@@ -10,8 +10,9 @@ RUN npm install
 # Copy the rest of your Expo source files
 COPY src/ .
 
-# Build the production static web files
-RUN npx expo export --platform web
+# Force a clean, non-interactive production export build
+ENV CI=true
+RUN npx expo export --platform web --clear
 
 # --- Stage 2: Serve with NGINX ---
 FROM nginx:alpine

@@ -1,0 +1,19 @@
+replicaCount: 1
+
+image:
+  repository: "" # Injected dynamically by GitHub Actions
+  pullPolicy: IfNotPresent
+  tag: ""        # Injected dynamically by GitHub Actions via git commit SHA
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: localhost
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
