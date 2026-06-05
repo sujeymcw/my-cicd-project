@@ -1,17 +1,21 @@
 # --- Stage 1: Build the Expo Web Assets ---
-FROM node:18-alpine AS builder
+# Switching to standard node:18 (Debian) for native build tool support
+FROM node:18 AS builder
 
 WORKDIR /app
 
 # Copy dependency files first from the clean src directory
 COPY src/package*.json ./
-RUN npm install
+
+# Clean cache and install dependencies with legacy peer resolution to prevent crashes
+RUN npm cache clean --force && npm install --legacy-peer-deps
 
 # Copy the rest of your Expo source files
 COPY src/ .
 
-# Force a clean, non-interactive production export build
+# Disable telemetry and interactive prompts, then force export
 ENV CI=true
+ENV EXPO_TELEMETRY_OPT_OUT=1
 RUN npx expo export --platform web --clear
 
 # --- Stage 2: Serve with NGINX ---
