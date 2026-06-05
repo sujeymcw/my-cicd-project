@@ -1,0 +1,46 @@
+name: CICD Demo Pipeline
+
+on:
+  push:
+    branches: [ "main" ] # Triggers the pipeline when you push to the main branch
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # 1. Continuous Integration: Triggered by Git Push
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # 2. Continuous Integration: Build Docker Image & Push to Registry
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.REGISTRY_USERNAME }}
+        password: ${{ secrets.REGISTRY_PASSWORD }}
+
+    - name: Build and Push Docker Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}
+
+    # 3. Continuous Delivery: Helm Upgrade & Kubernetes Deployment
+    - name: Setup Kubernetes Context
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBECONFIG }}
+
+    - name: Set up Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'v3.12.0'
+
+    - name: Deploy to Kubernetes via Helm
+      run: |
+        helm upgrade --install expo-web-release ./charts/my-web-app \
+          --set image.tag=${{ github.sha }} \
+          --namespace default
