@@ -1,6 +1,6 @@
 # --- Stage 1: Build the Expo Web Assets ---
-# Switching to standard node:18 (Debian) for native build tool support
-FROM node:18 AS builder
+# FIX: Upgraded from node:18 to node:20 to natively support .toReversed() and current Expo requirements
+FROM node:20 AS builder
 
 WORKDIR /app
 
