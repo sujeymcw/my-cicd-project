@@ -15,7 +15,7 @@ docker build -t sujeymcw/expo-web-app:$buildTag ./src --quiet
 
 # 4. Fire the Helm upgrade configuration immediately with no cloud delays
 Write-Output "STAGE 3 OF 4: Executing immediate Helm Chart upgrade parameters..."
-helm upgrade --install expo-web-release ./charts/my-web-app --set image.repository="sujeymcw/expo-web-app" --set image.tag=$buildTag --set service.type="LoadBalancer" --set service.port=80 --namespace default
+helm upgrade --install expo-web-release ./charts/my-web-app --set image.repository="sujeymcw/expo-web-app" --set image.tag=$buildTag --set image.imagePullPolicy="IfNotPresent" --set service.type="LoadBalancer" --set service.port=80 --namespace default
 
 # 5. Force the active Kubernetes deployment configurations to swap the containers open instantly
 Write-Output "STAGE 4 OF 4: Triggering instantaneous rolling update on cluster pods..."
