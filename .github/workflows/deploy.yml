@@ -44,3 +44,11 @@ jobs:
         helm upgrade --install expo-web-release ./charts/my-web-app \
           --set image.tag=${{ github.sha }} \
           --namespace default
+          
+    - name: Build and Push Docker Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}
+        no-cache: true # 🌟 FIX: Forces GitHub to skip cached layers and use Node 20 directly
