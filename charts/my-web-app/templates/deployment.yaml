@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: expo-web-deployment
+  labels:
+    app: expo-web-app
+spec:
+  replicas: {{ .Values.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app: expo-web-app
+  template:
+    metadata:
+      labels:
+        app: expo-web-app
+    spec:
+      containers:
+        - name: expo-web-container
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - containerPort: 80
