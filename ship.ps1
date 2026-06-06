@@ -11,7 +11,8 @@ git push origin main --quiet
 
 # 3. Compile and inject the image straight into your active Kubernetes node registry
 Write-Output "STAGE 2 OF 4: Baking Docker Image layers directly into local cluster nodes..."
-docker build -t sujeymcw/expo-web-app:$buildTag ./src --quiet
+# -f specifies the exact path to the Dockerfile, and ./src is the build context folder
+docker build -f ./src/Dockerfile -t sujeymcw/expo-web-app:$buildTag ./src --quiet
 
 # 4. Fire the Helm upgrade configuration immediately with no cloud delays
 Write-Output "STAGE 3 OF 4: Executing immediate Helm Chart upgrade parameters..."
@@ -19,6 +20,7 @@ helm upgrade --install expo-web-release ./charts/my-web-app --set image.reposito
 
 # 5. Force the active Kubernetes deployment configurations to swap the containers open instantly
 Write-Output "STAGE 4 OF 4: Triggering instantaneous rolling update on cluster pods..."
-kubectl rollout restart deployment/expo-web-app --namespace default
+# Updated target layout name to match your active cluster resource name
+kubectl rollout restart deployment/expo-web-deployment --namespace default
 
 Write-Output "SUCCESS: Local server is updated. Refresh your Control Plane UI!"
