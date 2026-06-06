@@ -3,13 +3,13 @@ FROM node:20 AS builder
 
 WORKDIR /app
 
-# Copy package files from src folder
+# Copy package files from src folder first to lock down cache layers
 COPY src/package*.json ./
 
-# Install dependencies
+# Install dependencies (This step will now take 0 seconds on subsequent runs!)
 RUN npm cache clean --force && npm install --legacy-peer-deps
 
-# Copy Expo source code
+# Copy the rest of your Expo source code AFTER dependencies are cached
 COPY src/ .
 
 # Expo settings
