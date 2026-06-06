@@ -1,0 +1,21 @@
+======================================================================
+⛵  HEM DEPLOYMENT COMPLETE: {{ .Release.Name }} (Revision #{{ .Release.Revision }})
+======================================================================
+
+STATUS:       Successfully deployed to namespace "{{ .Release.Namespace }}"
+UPDATED AT:   {{ .Release.Time }}
+
+🌐  LIVE LOCAL SERVER URL:
+    http://localhost
+
+🐳  ACTIVE CONTAINER MANIFEST:
+    Registry: {{ .Values.image.repository }}
+    Image Tag: {{ .Values.image.tag }}
+    Pull Policy: {{ .Values.image.imagePullPolicy }}
+
+📊  REAL-TIME DIAGNOSTIC COMMANDS:
+    View running pods:      kubectl get pods -l app=expo-web-app
+    Stream active logs:     kubectl logs -l app=expo-web-app --tail=20
+    Check resource load:    kubectl top pod -l app=expo-web-app
+
+======================================================================
