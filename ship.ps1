@@ -33,7 +33,7 @@ Write-Output "STAGE 4 OF 5: Triggering instantaneous rolling update on cluster p
 kubectl rollout restart deployment/expo-web-deployment --namespace default
 
 # 6. Shoot the Automated Slack Telemetry Card to your Sandbox Channel
-Write-Output "STAGE 5 OF 5: Dispatching instant telemetry alert to Slack..."
+Write-Output "STAGE 5 OF 5: Dispatching instant telemetry alert to Slack via curl..."
 
 # Dynamically parse the secret webhook from your untracked local file
 if (Test-Path "./local_settings.json") {
@@ -44,54 +44,25 @@ if (Test-Path "./local_settings.json") {
     Exit
 }
 
-# Pure JSON layout string guarantees Slack validation passes 100% of the time
-$jsonPayload = @"
-{
-  "attachments": [
-    {
-      "color": "#2EB886",
-      "pretext": "Deployment Rollout Successful",
-      "fallback": "Kubernetes Deployment Update Successful.",
-      "blocks": [
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": "The local Kubernetes cluster environment has successfully processed a rolling update layout step."
-          }
-        },
-        {
-          "type": "section",
-          "fields": [
-            { "type": "mrkdwn", "text": "*Operator:*\nSujey Hariprasad" },
-            { "type": "mrkdwn", "text": "*Build Tag:*\n$buildTag" },
-            { "type": "mrkdwn", "text": "*Environment:*\nLocal Cluster (default)" },
-            { "type": "mrkdwn", "text": "*Helm Release:*\nexpo-web-release" }
-          ]
-        },
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": "*Commit/Deployment Message:*\n_$customMessage_"
-          }
-        },
-        {
-          "type": "context",
-          "elements": [
-            {
-              "type": "mrkdwn",
-              "text": "Access URL: http://localhost  •  Time Sync: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}
+# Simplified, flat text payload string using robust formatting markdown
+$timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+$textPayload = @"
+*🚀 Deployment Rollout Successful*
+The local Kubernetes cluster environment has successfully processed a rolling update step.
+
+• *Operator:* Sujey Hariprasad
+• *Build Tag:* $buildTag
+• *Environment:* Local Cluster (default)
+• *Helm Release:* expo-web-release
+• *Commit Message:* $customMessage
+• *Access URL:* http://localhost  •  *Time Sync:* $timestamp
 "@
 
-# Fire the webhook straight into your Slack workspace!
-$null = Invoke-RestMethod -Uri $slackWebhookUrl -Method Post -Body $jsonPayload -ContentType "application/json; charset=utf-8"
+# Safely escape any problematic double-quotes inside the user's custom commit message
+$jsonPayload = @{ text = $textPayload } | ConvertTo-Json -Compress
 
+# Use native curl.exe with exact headers to send the compressed payload cleanly
+curl.exe -X POST -H "Content-type: application/json" --data $jsonPayload $slackWebhookUrl
+
+Write-Output ""
 Write-Output "SUCCESS: Local server is updated. Inspect the newly opened Helm terminal and refresh your Control Plane UI!"
