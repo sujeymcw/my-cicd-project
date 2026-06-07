@@ -11,45 +11,94 @@ if ([string]::IsNullOrWhiteSpace($customMessage)) {
     $customMessage = "style: rapid telemetry interface deployment sync"
 }
 
+# Slack sender function to prevent invalid_payload errors
+function Send-SlackMessage([string]$messageText) {
+    if (Test-Path "./webhook.json") {
+        $settings = Get-Content "./webhook.json" | ConvertFrom-Json
+        $slackWebhookUrl = $settings.SLACK_WEBHOOK_URL.Trim()
+
+        $bodyObject = @{
+            text = $messageText
+        }
+
+        $jsonBody = $bodyObject | ConvertTo-Json -Compress
+
+        Invoke-RestMethod `
+            -Uri $slackWebhookUrl `
+            -Method Post `
+            -Body $jsonBody `
+            -ContentType "application/json; charset=utf-8"
+    }
+}
+
+# HARD PORT CLEANER FUNCTION
+function Clear-Port8000 {
+    Write-Output "PERFORMING HARD SCRUB ON PORT 8000..."
+
+    try {
+        $connections = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
+
+        if ($connections) {
+            $processIds = $connections | Select-Object -ExpandProperty OwningProcess -Unique
+
+            foreach ($processId in $processIds) {
+                if ($processId -and $processId -ne $PID) {
+                    Write-Host "Killing process using port 8000: PID $processId" -ForegroundColor Yellow
+                    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+
+        Start-Sleep -Seconds 2
+
+        $stillUsed = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
+        if ($stillUsed) {
+            Write-Host "Port 8000 still busy. Retrying hard kill..." -ForegroundColor Red
+
+            $retryProcessIds = $stillUsed | Select-Object -ExpandProperty OwningProcess -Unique
+            foreach ($retryId in $retryProcessIds) {
+                if ($retryId -and $retryId -ne $PID) {
+                    Stop-Process -Id $retryId -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            Start-Sleep -Seconds 2
+        }
+
+        Write-Host "Port 8000 cleanup completed." -ForegroundColor Green
+    } catch {
+        Write-Host "Socket release sweep finished..." -ForegroundColor Yellow
+    }
+}
+
 # AUTOMATION 1: Aggressive process execution wipe to clear port 8000 permanently
 Write-Output "PERFORMING HARD SCRUB ON PORT 8000 AND LAUNCHING BACKEND..."
-try {
-    # 1. Force kill any active or zombie python tasks running on the system to instantly drop sockets
-    Stop-Process -Name "python" -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 500
-
-    # 2. Scavenge for any remaining hidden PID holding port 8000 hostage
-    $zombiePID = (Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue).OwningProcess
-    foreach ($pid in $zombiePID) {
-        if ($pid) { Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue }
-    }
-    Start-Sleep -Seconds 1 # Safe buffer pause to ensure the OS completely releases the socket layout
-} catch {
-    Write-Host "Socket release sweep finished..." -ForegroundColor Yellow
-}
+Clear-Port8000
 
 # Spawn the separate window, set location strictly to the root project folder, and launch the backend cleanly
 Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'LAUNCHING CONTROL PLANE BACKEND BRIDGE ENGINE...' -ForegroundColor Cyan; python dashboard_backend.py"
 
-Write-Output "Waiting 3 seconds for backend API server to bind cleanly to port 8000..."
-Start-Sleep -Seconds 3
+Write-Output "Waiting 5 seconds for backend API server to bind cleanly to port 8000..."
+Start-Sleep -Seconds 5
 
 Write-Output "STARTING INSTANT GITOPS PIPELINE ROLLOUT..."
 
 # Reusable Emergency Gatekeeper Function for Pipeline Safety
 function Send-SlackFailure([string]$stageName, [string]$errorDetails) {
-    if (Test-Path "./webhook.json") {
-        $settings = Get-Content "./webhook.json" | ConvertFrom-Json
-        $failPayload = "*=== KUBERNETES DEPLOYMENT CRITICAL FAILURE ===*" + "`n`n" +
-                       "*Broken Stage:* " + $stageName + "`n" +
-                       "*Error Context:* " + $errorDetails + "`n" +
-                       "--------------------------------------------------" + "`n" +
-                       "_Execution halted instantly to protect active cluster node stability._"
-        $body = @{ text = $failPayload }
-        $null = Invoke-RestMethod -Uri $settings.SLACK_WEBHOOK_URL -Method Post -Body ($body | ConvertTo-Json) -ContentType "application/json; charset=utf-8"
+    $failPayload = "*=== KUBERNETES DEPLOYMENT CRITICAL FAILURE ===*" + "`n`n" +
+                   "*Broken Stage:* " + $stageName + "`n" +
+                   "*Error Context:* " + $errorDetails + "`n" +
+                   "--------------------------------------------------" + "`n" +
+                   "_Execution halted instantly to protect active cluster node stability._"
+
+    try {
+        Send-SlackMessage $failPayload
+    } catch {
+        Write-Host "Slack failure alert could not be sent: $_" -ForegroundColor Yellow
     }
+
     Write-Error "CRITICAL: Pipeline halted during execution at $stageName."
-    
+
     # EMERGENCY FALLBACK: Navigate to 'src' in a separate window and open Expo for debugging
     Write-Output "LAUNCHING EXPO MOBILE INTERFACE CONSOLE IN SEPARATE POWERSHELL..."
     Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO MOBILE FRONTEND INTERFACE...' -ForegroundColor Blue; npx expo start -w"
@@ -59,9 +108,21 @@ function Send-SlackFailure([string]$stageName, [string]$errorDetails) {
 # 2. Stage 1: Sync with GitHub Tracking Repository
 Write-Output "STAGE 1 OF 5: Syncing source files with Git Repository..."
 git add .
-git commit -m "$customMessage" --quiet
+
+git diff --cached --quiet
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "No new source changes detected. Skipping git commit..." -ForegroundColor Yellow
+} else {
+    git commit -m "$customMessage" --quiet
+    if ($LASTEXITCODE -ne 0) {
+        Send-SlackFailure "STAGE 1 (Git Commit)" "Git commit failed."
+    }
+}
+
 git push origin main --quiet
-if (-not $?) { Send-SlackFailure "STAGE 1 (Git Sync)" "Repository push rejected or upstream remote server unavailable." }
+if ($LASTEXITCODE -ne 0) {
+    Send-SlackFailure "STAGE 1 (Git Sync)" "Repository push rejected or upstream remote server unavailable."
+}
 
 # 3. Stage 2: Compile and Inject Image with Live Disruption Interceptor Check
 Write-Output "STAGE 2 OF 5: Baking Docker Image layers directly into local cluster nodes..."
@@ -77,22 +138,30 @@ try {
 }
 
 docker build -f ./Dockerfile -t sujeymcw/expo-web-app:$buildTag . --quiet
-if (-not $?) { Send-SlackFailure "STAGE 2 (Docker Build)" "Compilation failed inside the Dockerfile environment layers." }
+if ($LASTEXITCODE -ne 0) {
+    Send-SlackFailure "STAGE 2 (Docker Build)" "Compilation failed inside the Dockerfile environment layers."
+}
 
 # 4. Stage 3: Helm Chart Manifest Deployments
 Write-Output "STAGE 3 OF 5: Launching independent terminal for Helm Chart status outputs..."
 helm upgrade --install expo-web-release ./charts/my-web-app --set image.repository="sujeymcw/expo-web-app" --set image.tag=$buildTag --set image.imagePullPolicy="IfNotPresent" --set service.type="LoadBalancer" --set service.port=80 --namespace default > $null
-if (-not $?) { Send-SlackFailure "STAGE 3 (Helm Upgrade)" "Helm manifest configuration parsing rejected by the target cluster." }
+if ($LASTEXITCODE -ne 0) {
+    Send-SlackFailure "STAGE 3 (Helm Upgrade)" "Helm manifest configuration parsing rejected by the target cluster."
+}
+
 Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'MONITORING ACTIVE HELM RELEASE STATUS...' -ForegroundColor Green; helm status expo-web-release --namespace default"
 
 # 5. Stage 4: Kubectl Rolling Pod Update
 Write-Output "STAGE 4 OF 5: Triggering instantaneous rolling update on cluster pods..."
 kubectl rollout restart deployment/expo-web-deployment --namespace default
-if (-not $?) { Send-SlackFailure "STAGE 4 (Kubectl Rollout)" "Deployment target missing or pod template scheduling initialization failed." }
+if ($LASTEXITCODE -ne 0) {
+    Send-SlackFailure "STAGE 4 (Kubectl Rollout)" "Deployment target missing or pod template scheduling initialization failed."
+}
 
 # 6. Active Network Probing Check
 Write-Output "RUNNING OPERATIONAL ENVIRONMENT HEALTH CHECK..."
 Start-Sleep -Seconds 3
+
 $portCheck = Test-NetConnection -ComputerName "localhost" -Port 80 -WarningAction SilentlyContinue
 if ($portCheck.TcpTestSucceeded) {
     $healthStatus = "PASSED (Port 80 responding cleanly)"
@@ -107,13 +176,6 @@ $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 
 # 7. Stage 5: Dispatch Automated Slack Telemetry Card
 Write-Output "STAGE 5 OF 5: Dispatching instant telemetry alert to Slack..."
-if (Test-Path "./webhook.json") {
-    $settings = Get-Content "./webhook.json" | ConvertFrom-Json
-    $slackWebhookUrl = $settings.SLACK_WEBHOOK_URL
-} else {
-    Write-Error "Missing webhook.json file! Cannot dispatch Slack alert."
-    Exit
-}
 
 $textPayload = "*=== KUBERNETES DEPLOYMENT ROLLOUT SUCCESSFUL ===*" + "`n`n" +
                "*Deployment Status:* Active & Rolling" + "`n" +
@@ -130,9 +192,8 @@ $textPayload = "*=== KUBERNETES DEPLOYMENT ROLLOUT SUCCESSFUL ===*" + "`n`n" +
                "--------------------------------------------------" + "`n`n" +
                "_Telemetry Sync Complete: " + $timestamp + "_"
 
-$bodyObject = @{ text = $textPayload }
 try {
-    $null = Invoke-RestMethod -Uri $slackWebhookUrl -Method Post -Body ($bodyObject | ConvertTo-Json) -ContentType "application/json; charset=utf-8"
+    Send-SlackMessage $textPayload
 } catch {
     Write-Error "Slack API failed: $_"
 }
