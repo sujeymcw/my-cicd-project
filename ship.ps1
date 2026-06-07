@@ -35,12 +35,6 @@ function Test-CommandExists {
     return $null -ne $command
 }
 
-function Refresh-Path {
-    $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-    $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
-    $env:Path = $machinePath + ";" + $userPath
-}
-
 function Invoke-SafeCommandToFile {
     param (
         [string]$Title,
@@ -79,107 +73,6 @@ function Invoke-RequiredCommandCheck {
             exit 1
         }
     }
-}
-
-function Install-MinikubeIfMissing {
-    Write-Output ""
-    Write-Output "PRE-FLIGHT: Checking Minikube installation..."
-
-    if (Test-CommandExists "minikube") {
-        Write-Output "Minikube is already installed."
-        return
-    }
-
-    Write-Output "Minikube is not installed. Installing Minikube using winget..."
-
-    if (-not (Test-CommandExists "winget")) {
-        Write-Error "winget is not available. Install Minikube manually using: winget install Kubernetes.minikube"
-        exit 1
-    }
-
-    winget install --id Kubernetes.minikube -e --accept-package-agreements --accept-source-agreements
-
-    Refresh-Path
-
-    if (-not (Test-CommandExists "minikube")) {
-        Write-Error "Minikube was installed, but PowerShell cannot detect it yet. Close this terminal, open PowerShell again, and rerun this script."
-        exit 1
-    }
-
-    Write-Output "Minikube installed successfully."
-}
-
-function Start-MinikubeCluster {
-    Write-Output ""
-    Write-Output "PRE-FLIGHT: Checking Minikube cluster..."
-
-    minikube status *> $null
-
-    if ($LASTEXITCODE -eq 0) {
-        Write-Output "Minikube cluster is already running."
-        return
-    }
-
-    Write-Output "Starting Minikube cluster using Docker driver..."
-
-    minikube start --driver=docker
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Minikube failed to start. Make sure Docker Desktop is running."
-        exit 1
-    }
-
-    Write-Output "Minikube cluster started successfully."
-}
-
-function Ensure-MetricsServer {
-    Write-Output ""
-    Write-Output "PRE-FLIGHT: Checking Kubernetes Metrics Server..."
-
-    $topCheck = kubectl top nodes 2>&1
-
-    if ($LASTEXITCODE -eq 0) {
-        Write-Output "Metrics Server is already active."
-        return
-    }
-
-    Write-Output "Metrics Server not ready yet."
-    Write-Output "Current metrics response: $topCheck"
-
-    if (-not (Test-CommandExists "minikube")) {
-        Write-Error "Minikube is required to enable metrics-server addon."
-        exit 1
-    }
-
-    Write-Output "Enabling Minikube metrics-server addon..."
-
-    minikube addons enable metrics-server
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to enable metrics-server addon."
-        exit 1
-    }
-
-    Write-Output "Waiting for metrics-server rollout..."
-
-    kubectl rollout status deployment/metrics-server -n kube-system --timeout=180s
-
-    Write-Output "Waiting for Metrics API to become available..."
-
-    for ($i = 1; $i -le 30; $i++) {
-        $metricsCheck = kubectl top nodes 2>&1
-
-        if ($LASTEXITCODE -eq 0) {
-            Write-Output "Metrics Server is active. CPU and memory metrics are available."
-            return
-        }
-
-        Write-Output "Metrics API warming up... attempt $i of 30"
-        Start-Sleep -Seconds 5
-    }
-
-    Write-Output "Metrics Server is installed but metrics are still not available yet."
-    Write-Output "Deployment will continue. The Helm output file will show this clearly instead of crashing."
 }
 
 function Send-SlackMessage {
@@ -331,13 +224,11 @@ function Write-HelmChartOutput {
 @"
 
 # ============================================================
-# METRICS NOTE
+# METRICS STATUS
 # ============================================================
-# If this file shows "metrics not available yet", the deployment is not failed.
-# It only means metrics-server is still warming up.
-# Run after 1-2 minutes:
-#   kubectl top nodes
-#   kubectl top pods --namespace $namespace
+# Metrics Server : Active
+# Pod Metrics    : Captured using kubectl top pods
+# Node Metrics   : Captured using kubectl top nodes
 # ============================================================
 
 "@ | Out-File $helmChartOutputFile -Append -Encoding UTF8
@@ -350,8 +241,6 @@ function Write-HelmChartOutput {
 # ============================================================
 
 Invoke-RequiredCommandCheck
-Install-MinikubeIfMissing
-Start-MinikubeCluster
 
 $expoPort = Get-FreeExpoPort
 
@@ -374,8 +263,6 @@ Write-Output ""
 Write-Output "Workflow:"
 Write-Output "Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment"
 Write-Output ""
-
-Ensure-MetricsServer
 
 Write-Output ""
 Write-Output "STAGE 1: Pushing code to GitHub..."

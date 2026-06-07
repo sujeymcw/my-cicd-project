@@ -1,22 +1,17 @@
 ﻿# ============================================================
 # HELM CHART DEPLOYMENT OUTPUT
 # ============================================================
-# Generated At: 2026-06-07 18:37:45
-# Workflow:
-#   Git Push
-#      â†“
-#   Build Image
-#      â†“
-#   Push Registry
-#      â†“
-#   Helm Upgrade
-#      â†“
-#   Kubernetes Deployment
-#
-# Docker Image : sujeymcw/expo-web-app:local-20260607-183543
+# Generated At : 2026-06-07 18:44:37
+# Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
+# Docker Image : sujeymcw/expo-web-app:local-20260607-184344
 # Helm Release : expo-web-release
 # Namespace    : default
 # Chart Path   : ./charts/my-web-app
+# ============================================================
+
+
+# ============================================================
+# HELM RENDERED MANIFEST
 # ============================================================
 
 ---
@@ -52,7 +47,7 @@ spec:
     spec:
       containers:
         - name: expo-web-container
-          image: "sujeymcw/expo-web-app:local-20260607-183543"
+          image: "sujeymcw/expo-web-app:local-20260607-184344"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -62,29 +57,30 @@ spec:
 # ============================================================
 
 NAME: expo-web-release
-LAST DEPLOYED: Sun Jun  7 18:37:30 2026
+LAST DEPLOYED: Sun Jun  7 18:44:31 2026
 NAMESPACE: default
 STATUS: deployed
-REVISION: 1
-DESCRIPTION: Install complete
+REVISION: 2
+DESCRIPTION: Upgrade complete
 RESOURCES:
-==> v1/Pod(related)
-NAME                                   READY   STATUS    RESTARTS   AGE
-expo-web-deployment-5c48bffb8c-gtrnd   1/1     Running   0          14s
-
 ==> v1/Service
 NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
-expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   14s
+expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   7m8s
 
 ==> v1/Deployment
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
-expo-web-deployment   1/1     1            1           14s
+expo-web-deployment   1/1     1            1           7m8s
+
+==> v1/Pod(related)
+NAME                                   READY   STATUS      RESTARTS   AGE
+expo-web-deployment-5c48bffb8c-gtrnd   0/1     Completed   0          7m8s
+expo-web-deployment-6bb595cf5-6pns4    1/1     Running     0          8s
 
 
 TEST SUITE: None
 NOTES:
 ======================================================================
-Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #1)
+Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #2)
 ======================================================================
 
 STATUS:       Successfully deployed to namespace "default"
@@ -95,7 +91,7 @@ UPDATED AT:
 
 ≡ƒÉ│  ACTIVE CONTAINER MANIFEST:
     Registry: sujeymcw/expo-web-app
-    Image Tag: local-20260607-183543
+    Image Tag: local-20260607-184344
     Pull Policy: IfNotPresent
 
 ≡ƒôè  REAL-TIME DIAGNOSTIC COMMANDS:
@@ -106,28 +102,67 @@ UPDATED AT:
 ======================================================================
 
 # ============================================================
+# HELM RELEASE VALUES
+# ============================================================
+
+USER-SUPPLIED VALUES:
+image:
+  imagePullPolicy: IfNotPresent
+  repository: sujeymcw/expo-web-app
+  tag: local-20260607-184344
+service:
+  port: 80
+  type: LoadBalancer
+
+# ============================================================
 # KUBERNETES DEPLOYMENT STATUS
 # ============================================================
 
-NAME                  READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS           IMAGES                                        SELECTOR
-expo-web-deployment   1/1     1            1           15s   expo-web-container   sujeymcw/expo-web-app:local-20260607-183543   app=expo-web-app
+NAME                  READY   UP-TO-DATE   AVAILABLE   AGE    CONTAINERS           IMAGES                                        SELECTOR
+expo-web-deployment   1/1     1            1           7m9s   expo-web-container   sujeymcw/expo-web-app:local-20260607-184344   app=expo-web-app
 
 # ============================================================
 # KUBERNETES POD STATUS
 # ============================================================
 
-NAME                                   READY   STATUS    RESTARTS   AGE   IP           NODE       NOMINATED NODE   READINESS GATES
-expo-web-deployment-5c48bffb8c-gtrnd   1/1     Running   0          15s   10.244.0.5   minikube   <none>           <none>
+NAME                                  READY   STATUS    RESTARTS   AGE   IP           NODE       NOMINATED NODE   READINESS GATES
+expo-web-deployment-6bb595cf5-6pns4   1/1     Running   0          10s   10.244.0.6   minikube   <none>           <none>
 
 # ============================================================
 # KUBERNETES SERVICE STATUS
 # ============================================================
 
 NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE     SELECTOR
-expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   15s     app=expo-web-app
-kubernetes         ClusterIP      10.96.0.1        <none>        443/TCP        4m32s   <none>
+expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   7m11s   app=expo-web-app
+kubernetes         ClusterIP      10.96.0.1        <none>        443/TCP        11m     <none>
 
 # ============================================================
-# RESOURCE METRICS
+# POD CPU AND MEMORY METRICS
+# ============================================================
+
+kubectl : error: metrics not available yet
+At line:1 char:1
++ kubectl top pods --namespace default 2>&1
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (error: metrics not available yet:String) [], RemoteExc 
+   eption
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+# ============================================================
+# NODE CPU AND MEMORY METRICS
+# ============================================================
+
+NAME       CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
+minikube   349m         2%       715Mi           10%         
+
+# ============================================================
+# METRICS NOTE
+# ============================================================
+# If this file shows "metrics not available yet", the deployment is not failed.
+# It only means metrics-server is still warming up.
+# Run after 1-2 minutes:
+#   kubectl top nodes
+#   kubectl top pods --namespace default
 # ============================================================
 
