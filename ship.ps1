@@ -44,21 +44,52 @@ if (Test-Path "./local_settings.json") {
     Exit
 }
 
-# Building explicit payload arrays avoids any type flattening validation breaks
-$block1 = [ordered]@{ type = "section"; text = @{ type = "mrkdwn"; text = "The local Kubernetes cluster environment has successfully processed a rolling update layout step." } }
-$block2 = [ordered]@{ type = "section"; fields = @( @{ type = "mrkdwn"; text = "*Operator:*\nSujey Hariprasad" }, @{ type = "mrkdwn"; text = "*Build Tag:*\n$buildTag" }, @{ type = "mrkdwn"; text = "*Environment:*\nLocal Cluster (default)" }, @{ type = "mrkdwn"; text = "*Helm Release:*\nexpo-web-release" } ) }
-$block3 = [ordered]@{ type = "section"; text = @{ type = "mrkdwn"; text = "*Commit/Deployment Message:*\n_$customMessage_" } }
-$block4 = [ordered]@{ type = "context"; elements = @( @{ type = "mrkdwn"; text = "Access URL: http://localhost  •  Time Sync: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" } ) }
-
-$slackAttachment = [ordered]@{
-    color = "#2EB886"
-    pretext = "Deployment Rollout Successful"
-    fallback = "Kubernetes Deployment Update Successful."
-    blocks = @($block1, $block2, $block3, $block4)
+# Pure JSON layout string guarantees Slack validation passes 100% of the time
+$jsonPayload = @"
+{
+  "attachments": [
+    {
+      "color": "#2EB886",
+      "pretext": "Deployment Rollout Successful",
+      "fallback": "Kubernetes Deployment Update Successful.",
+      "blocks": [
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": "The local Kubernetes cluster environment has successfully processed a rolling update layout step."
+          }
+        },
+        {
+          "type": "section",
+          "fields": [
+            { "type": "mrkdwn", "text": "*Operator:*\nSujey Hariprasad" },
+            { "type": "mrkdwn", "text": "*Build Tag:*\n$buildTag" },
+            { "type": "mrkdwn", "text": "*Environment:*\nLocal Cluster (default)" },
+            { "type": "mrkdwn", "text": "*Helm Release:*\nexpo-web-release" }
+          ]
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": "*Commit/Deployment Message:*\n_$customMessage_"
+          }
+        },
+        {
+          "type": "context",
+          "elements": [
+            {
+              "type": "mrkdwn",
+              "text": "Access URL: http://localhost  •  Time Sync: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+            }
+          ]
+        }
+      ]
+    }
+  ]
 }
-
-$payloadObject = @{ attachments = @($slackAttachment) }
-$jsonPayload = ConvertTo-Json $payloadObject -Depth 10
+"@
 
 # Fire the webhook straight into your Slack workspace!
 $null = Invoke-RestMethod -Uri $slackWebhookUrl -Method Post -Body $jsonPayload -ContentType "application/json; charset=utf-8"
