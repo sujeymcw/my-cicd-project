@@ -11,15 +11,24 @@ if ([string]::IsNullOrWhiteSpace($customMessage)) {
     $customMessage = "style: rapid telemetry interface deployment sync"
 }
 
-# AUTOMATION 1: Clear out port 8000 to prevent errors, then spawn the Python backend natively in the root directory
-Write-Output "CLEARING PORT 8000 AND LAUNCHING BACKEND IN ROOT PROJECT DIR..."
+# AUTOMATION 1: Aggressive process execution wipe to clear port 8000 permanently
+Write-Output "PERFORMING HARD SCRUB ON PORT 8000 AND LAUNCHING BACKEND..."
 try {
-    # Find and terminate whatever is squatting on port 8000 to prevent WinError 10048
-    $oldProcess = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -First 1
-    if ($oldProcess) { Stop-Process -Id $oldProcess -Force -ErrorAction SilentlyContinue }
-} catch {}
+    # 1. Force kill any active or zombie python tasks running on the system to instantly drop sockets
+    Stop-Process -Name "python" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
 
-# Spawn a separate window, set location strictly to the root project folder, and launch the backend
+    # 2. Scavenge for any remaining hidden PID holding port 8000 hostage
+    $zombiePID = (Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue).OwningProcess
+    foreach ($pid in $zombiePID) {
+        if ($pid) { Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue }
+    }
+    Start-Sleep -Seconds 1 # Safe buffer pause to ensure the OS completely releases the socket layout
+} catch {
+    Write-Host "Socket release sweep finished..." -ForegroundColor Yellow
+}
+
+# Spawn the separate window, set location strictly to the root project folder, and launch the backend cleanly
 Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'LAUNCHING CONTROL PLANE BACKEND BRIDGE ENGINE...' -ForegroundColor Cyan; python dashboard_backend.py"
 
 Write-Output "Waiting 3 seconds for backend API server to bind cleanly to port 8000..."
@@ -132,6 +141,6 @@ Write-Output ""
 Write-Output "SUCCESS: Local server is updated. Total pipeline execution velocity: $executionDuration seconds."
 Write-Output "--------------------------------------------------"
 
-# AUTOMATION 2: Keep navigating directly into the 'src' subfolder before initiating npx expo start
+# AUTOMATION 2: Open Expo development suite completely inside its standalone window environment tail
 Write-Output "LAUNCHING EXPO MOBILE INTERFACE CONSOLE IN SEPARATE POWERSHELL..."
 Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO MOBILE FRONTEND INTERFACE...' -ForegroundColor Blue; npx expo start -w"
