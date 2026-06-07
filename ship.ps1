@@ -11,16 +11,9 @@ if ([string]::IsNullOrWhiteSpace($customMessage)) {
     $customMessage = "style: rapid telemetry interface deployment sync"
 }
 
-# AUTOMATION 1: Kill any ghost processes on port 8000, cd into src, and spin up the backend cleanly
-Write-Output "CLEARING PORT 8000 AND LAUNCHING BACKEND INSIDE SRC..."
-try {
-    # Find and terminate whatever is squatting on port 8000 to prevent WinError 10048
-    $oldProcess = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -First 1
-    if ($oldProcess) { Stop-Process -Id $oldProcess -Force -ErrorAction SilentlyContinue }
-} catch {}
-
-# Spawn the separate window and explicitly steer it into the src directory
-Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING CONTROL PLANE BACKEND BRIDGE ENGINE...' -ForegroundColor Cyan; python dashboard_backend.py"
+# AUTOMATION 1: Spawn a separate window, navigate to root project, and execute the backend
+Write-Output "LAUNCHING PYTHON BACKEND SYSTEM IN SEPARATE POWERSHELL..."
+Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'LAUNCHING CONTROL PLANE BACKEND BRIDGE ENGINE...' -ForegroundColor Cyan; python dashboard_backend.py"
 
 Write-Output "Waiting 3 seconds for backend API server to bind cleanly to port 8000..."
 Start-Sleep -Seconds 3
@@ -132,6 +125,6 @@ Write-Output ""
 Write-Output "SUCCESS: Local server is updated. Total pipeline execution velocity: $executionDuration seconds."
 Write-Output "--------------------------------------------------"
 
-# AUTOMATION 2: Navigate directly into the 'src' subfolder before initiating npx expo start
+# AUTOMATION 2: Fixed to navigate directly into the 'src' subfolder before initiating npx expo start
 Write-Output "LAUNCHING EXPO MOBILE INTERFACE CONSOLE IN SEPARATE POWERSHELL..."
 Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO MOBILE FRONTEND INTERFACE...' -ForegroundColor Blue; npx expo start -w"
