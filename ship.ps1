@@ -12,6 +12,21 @@ if ([string]::IsNullOrWhiteSpace($customMessage)) {
     $customMessage = "style: rapid telemetry interface deployment sync"
 }
 
+Write-Output "INITIALIZING BACKEND API ENGINE AND DASHBOARD CONSOLE..."
+
+# NEW AUTOMATION 1: Automatically spin up your Python backend server in a background stream
+# Assumes standard uvicorn main:app structure. Adjust string script names if your entrypoint file is named differently.
+if (Get-Command "uvicorn" -ErrorAction SilentlyContinue) {
+    Start-Process uvicorn -ArgumentList "main:app --host 127.0.0.1 --port 8000" -WindowStyle Hidden
+    Start-Sleep -Seconds 2 # Give the web api loop a brief moment to bind to the port layout cleanly
+} else {
+    Write-Host "Warning: uvicorn path not found globally. Make sure python environment is active." -ForegroundColor Yellow
+}
+
+# NEW AUTOMATION 2: Automatically pop open your preferred browser directly to your Control Plane dashboard
+# Change this URL if your Expo web interface dashboard endpoint is mapped to a different port (like 8081 or 19006)
+Start-Process "http://localhost:8081"
+
 Write-Output "STARTING INSTANT GITOPS PIPELINE ROLLOUT..."
 
 # Reusable Emergency Gatekeeper Function for Pipeline Safety
@@ -40,7 +55,7 @@ if (-not $?) { Send-SlackFailure "STAGE 1 (Git Sync)" "Repository push rejected 
 # 3. Compile and inject the image straight into your active Kubernetes node registry
 Write-Output "STAGE 2 OF 5: Baking Docker Image layers directly into local cluster nodes..."
 
-# NEW LIVE API DISRUPTION INTERCEPTOR CHECK
+# LIVE API DISRUPTION INTERCEPTOR CHECK
 try {
     $disruptCheck = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/metrics" -Method Get -TimeoutSec 2
     if ($disruptCheck.chaosSimulationActive -eq $true -or $disruptCheck.disrupted -eq $true) {
