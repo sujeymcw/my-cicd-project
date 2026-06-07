@@ -12,20 +12,17 @@ if ([string]::IsNullOrWhiteSpace($customMessage)) {
     $customMessage = "style: rapid telemetry interface deployment sync"
 }
 
-Write-Output "INITIALIZING BACKEND API ENGINE AND DASHBOARD CONSOLE..."
+Write-Output "INITIALIZING BACKEND API ENGINE ENGINE..."
 
-# NEW AUTOMATION 1: Automatically spin up your Python backend server in a background stream
-# Assumes standard uvicorn main:app structure. Adjust string script names if your entrypoint file is named differently.
-if (Get-Command "uvicorn" -ErrorAction SilentlyContinue) {
-    Start-Process uvicorn -ArgumentList "main:app --host 127.0.0.1 --port 8000" -WindowStyle Hidden
-    Start-Sleep -Seconds 2 # Give the web api loop a brief moment to bind to the port layout cleanly
+# AUTOMATION 1: Find Python locally and launch your specific dashboard_backend.py in a background window
+if (Test-Path ".\venv\Scripts\python.exe") {
+    # If using a local virtual environment folder
+    Start-Process ".\venv\Scripts\python.exe" -ArgumentList "dashboard_backend.py" -WindowStyle Hidden
 } else {
-    Write-Host "Warning: uvicorn path not found globally. Make sure python environment is active." -ForegroundColor Yellow
+    # Fallback to the global system Python path
+    Start-Process "python" -ArgumentList "dashboard_backend.py" -WindowStyle Hidden
 }
-
-# NEW AUTOMATION 2: Automatically pop open your preferred browser directly to your Control Plane dashboard
-# Change this URL if your Expo web interface dashboard endpoint is mapped to a different port (like 8081 or 19006)
-Start-Process "http://localhost:8081"
+Start-Sleep -Seconds 3 # Give the Python backend server 3 seconds to spin up and bind to port 8000 safely
 
 Write-Output "STARTING INSTANT GITOPS PIPELINE ROLLOUT..."
 
@@ -42,6 +39,10 @@ function Send-SlackFailure([string]$stageName, [string]$errorDetails) {
         $null = Invoke-RestMethod -Uri $settings.SLACK_WEBHOOK_URL -Method Post -Body ($body | ConvertTo-Json) -ContentType "application/json; charset=utf-8"
     }
     Write-Error "CRITICAL: Pipeline halted during execution at $stageName."
+    
+    # FINAL STEP FALLBACK: Even if the pipeline breaks, we still want to open your frontend dashboard for debugging!
+    Write-Output "LAUNCHING INTERACTIVE EXPO WEB INTERFACE DEV SYSTEM..."
+    npx expo start -w
     Exit
 }
 
@@ -138,3 +139,8 @@ try {
 Write-Output ""
 Write-Output "SUCCESS: Local server is updated. Inspect the newly opened Helm terminal and refresh your Control Plane UI!"
 Write-Output "Total execution processing velocity completed in $executionDuration seconds."
+Write-Output "--------------------------------------------------"
+
+# AUTOMATION 2: THE FINAL STEP. Spin up your Expo dashboard directly inside the default web browser layout
+Write-Output "LAUNCHING INTERACTIVE EXPO WEB INTERFACE DEV SYSTEM..."
+npx expo start -w
