@@ -1,12 +1,22 @@
 # 1. Generate a crisp timestamp-based unique build tag identifier
 $buildTag = "local-" + (Get-Date -Format "yyyyMMdd-HHmmss")
 
+# NEW: Prompt the user for a custom commit message right at launch
+Write-Output "--------------------------------------------------"
+$customMessage = Read-Host "💬 Enter your commit/deployment message"
+Write-Output "--------------------------------------------------"
+
+# Fallback to a default message if you just press Enter
+if ([string]::IsNullOrWhiteSpace($customMessage)) {
+    $customMessage = "style: rapid telemetry interface deployment sync"
+}
+
 Write-Output "STARTING INSTANT GITOPS PIPELINE ROLLOUT..."
 
 # 2. Automatically push your code updates to your GitHub tracking repo in the background
 Write-Output "STAGE 1 OF 4: Syncing source files with Git Repository..."
 git add .
-git commit -m "style: rapid telemetry interface deployment sync" --quiet
+git commit -m "$customMessage" --quiet
 git push origin main --quiet
 
 # 3. Compile and inject the image straight into your active Kubernetes node registry
