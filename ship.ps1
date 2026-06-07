@@ -83,6 +83,48 @@ function Get-FreeExpoPort {
 
 $expoPort = Get-FreeExpoPort
 
+function Ensure-MetricsServer {
+    Write-Host ""
+    Write-Host "VERIFYING KUBERNETES METRICS SERVER..." -ForegroundColor Cyan
+
+    kubectl top nodes *> $null
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Metrics Server already active." -ForegroundColor Green
+        return
+    }
+
+    Write-Host "Metrics Server not detected. Enabling automatically..." -ForegroundColor Yellow
+
+    minikube addons enable metrics-server
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Failed to enable metrics-server addon. Continuing without live CPU/memory metrics." -ForegroundColor Red
+        return
+    }
+
+    Write-Host "Waiting for Metrics Server to become ready..." -ForegroundColor Yellow
+
+    kubectl rollout status deployment/metrics-server -n kube-system --timeout=120s *> $null
+
+    $maxAttempts = 30
+
+    for ($i = 1; $i -le $maxAttempts; $i++) {
+        kubectl top nodes *> $null
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Metrics Server successfully activated." -ForegroundColor Green
+            return
+        }
+
+        Write-Host "Waiting for Metrics API... ($i/$maxAttempts)" -ForegroundColor Yellow
+        Start-Sleep -Seconds 5
+    }
+
+    Write-Host "Metrics Server is enabled but Metrics API is still warming up." -ForegroundColor Yellow
+    Write-Host "CPU/memory may appear after a few more seconds." -ForegroundColor Yellow
+}
+
 function Show-KubernetesTelemetry {
     param (
         [string]$ImageName,
@@ -133,8 +175,7 @@ function Show-KubernetesTelemetry {
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host ""
-        Write-Host "kubectl top pods not available. Metrics server may not be enabled." -ForegroundColor Red
-        Write-Host "Showing pod resource requests and limits instead:" -ForegroundColor Yellow
+        Write-Host "Live metrics still unavailable. Showing resource requests and limits instead:" -ForegroundColor Yellow
         kubectl describe deployment expo-web-deployment --namespace default | Select-String "Limits|Requests|cpu|memory"
     }
 
@@ -144,8 +185,7 @@ function Show-KubernetesTelemetry {
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host ""
-        Write-Host "kubectl top nodes not available. Enable metrics-server using:" -ForegroundColor Yellow
-        Write-Host "minikube addons enable metrics-server" -ForegroundColor Green
+        Write-Host "Node live metrics still unavailable. Metrics Server may still be warming up." -ForegroundColor Yellow
     }
 
     Write-Host ""
@@ -235,6 +275,8 @@ if ($LASTEXITCODE -ne 0) {
     Send-SlackFailure "STAGE 3 (Helm Upgrade)" "Helm manifest configuration parsing rejected by the target cluster."
 }
 
+Ensure-MetricsServer
+
 Write-Output "STAGE 4 OF 5: Triggering instantaneous rolling update on cluster pods..."
 kubectl rollout restart deployment/expo-web-deployment --namespace default
 if ($LASTEXITCODE -ne 0) {
@@ -243,7 +285,7 @@ if ($LASTEXITCODE -ne 0) {
 
 kubectl rollout status deployment/expo-web-deployment --namespace default --timeout=120s
 
-Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'LIVE HELM + KUBERNETES DEPLOYMENT OUTPUT' -ForegroundColor Cyan; Write-Host 'Docker Image: ${dockerImage}:$buildTag' -ForegroundColor Green; Write-Host ''; helm status expo-web-release --namespace default; Write-Host ''; Write-Host 'DEPLOYED IMAGE:' -ForegroundColor Yellow; kubectl get deployment expo-web-deployment --namespace default -o=jsonpath='{.spec.template.spec.containers[*].image}'; Write-Host ''; Write-Host ''; Write-Host 'PODS:' -ForegroundColor Yellow; kubectl get pods --namespace default -o wide; Write-Host ''; Write-Host 'POD COUNT:' -ForegroundColor Yellow; kubectl get pods --namespace default --no-headers | find /c /v ''; Write-Host ''; Write-Host 'SERVICES:' -ForegroundColor Yellow; kubectl get svc --namespace default -o wide; Write-Host ''; Write-Host 'MEMORY AND CPU USAGE:' -ForegroundColor Yellow; kubectl top pods --namespace default; Write-Host ''; Write-Host 'NODE MEMORY:' -ForegroundColor Yellow; kubectl top nodes; Write-Host ''; Write-Host 'If memory is unavailable, run: minikube addons enable metrics-server'"
+Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'LIVE HELM + KUBERNETES DEPLOYMENT OUTPUT' -ForegroundColor Cyan; Write-Host 'Docker Image: ${dockerImage}:$buildTag' -ForegroundColor Green; Write-Host ''; helm status expo-web-release --namespace default; Write-Host ''; Write-Host 'DEPLOYED IMAGE:' -ForegroundColor Yellow; kubectl get deployment expo-web-deployment --namespace default -o=jsonpath='{.spec.template.spec.containers[*].image}'; Write-Host ''; Write-Host ''; Write-Host 'PODS:' -ForegroundColor Yellow; kubectl get pods --namespace default -o wide; Write-Host ''; Write-Host 'POD COUNT:' -ForegroundColor Yellow; kubectl get pods --namespace default --no-headers | find /c /v ''; Write-Host ''; Write-Host 'SERVICES:' -ForegroundColor Yellow; kubectl get svc --namespace default -o wide; Write-Host ''; Write-Host 'MEMORY AND CPU USAGE:' -ForegroundColor Yellow; kubectl top pods --namespace default; Write-Host ''; Write-Host 'NODE MEMORY:' -ForegroundColor Yellow; kubectl top nodes; Write-Host ''; Write-Host 'Metrics Server is auto-enabled by main pipeline if missing.'"
 
 Show-KubernetesTelemetry -ImageName $dockerImage -ImageTag $buildTag
 
