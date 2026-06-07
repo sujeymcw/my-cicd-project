@@ -39,6 +39,20 @@ if (-not $?) { Send-SlackFailure "STAGE 1 (Git Sync)" "Repository push rejected 
 
 # 3. Compile and inject the image straight into your active Kubernetes node registry
 Write-Output "STAGE 2 OF 5: Baking Docker Image layers directly into local cluster nodes..."
+
+# NEW LIVE API DISRUPTION INTERCEPTOR CHECK
+try {
+    $disruptCheck = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/metrics" -Method Get -TimeoutSec 2
+    if ($disruptCheck.chaosSimulationActive -eq $true -or $disruptCheck.disrupted -eq $true) {
+        Write-Host ""
+        Write-Host "!!! CHAOS INTERACTION DETECTED: Simulating Broken Docker Compilation !!!" -ForegroundColor Red
+        Send-SlackFailure "STAGE 2 (Docker Build)" "Compilation failed inside the Dockerfile environment layers due to an armed infrastructure disruption."
+    }
+} catch {
+    Write-Host "Metrics API bridge offline, proceeding with standard verification loop..." -ForegroundColor Yellow
+}
+
+# Standard Docker build sequence runs if disruption flag is false
 docker build -f ./Dockerfile -t sujeymcw/expo-web-app:$buildTag . --quiet
 if (-not $?) { Send-SlackFailure "STAGE 2 (Docker Build)" "Compilation failed inside the Dockerfile environment layers." }
 
