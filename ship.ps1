@@ -33,7 +33,7 @@ Write-Output "STAGE 4 OF 5: Triggering instantaneous rolling update on cluster p
 kubectl rollout restart deployment/expo-web-deployment --namespace default
 
 # 6. Shoot the Automated Slack Telemetry Card to your Sandbox Channel
-Write-Output "STAGE 5 OF 5: Dispatching instant telemetry alert to Slack via curl stream..."
+Write-Output "STAGE 5 OF 5: Dispatching instant telemetry alert to Slack..."
 
 # Dynamically parse the secret webhook from your untracked local file
 if (Test-Path "./webhook.json") {
@@ -44,42 +44,29 @@ if (Test-Path "./webhook.json") {
     Exit
 }
 
-# Simplified, flat text payload string using robust formatting markdown
+# Clean, corporate bold markdown layout with zero unstable emoji encodings
 $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-$textPayload = @"
-*🚀 Deployment Rollout Successful*
-The local Kubernetes cluster environment has successfully processed a rolling update step.
+$textPayload = "*=== KUBERNETES DEPLOYMENT ROLLOUT SUCCESSFUL ===*" + "`n`n" +
+               "*Deployment Status:* Active & Rolling" + "`n" +
+               "*Local Endpoint URL:* http://localhost" + "`n`n" +
+               "--------------------------------------------------" + "`n" +
+               "*PIPELINE METRICS LOGS*" + "`n" +
+               "> *Operator:* Sujey Hariprasad" + "`n" +
+               "> *Cluster Environment:* Local Desktop Node (default)" + "`n" +
+               "> *Helm Chart Release:* expo-web-release" + "`n" +
+               "> *Unique Build Tag:* " + $buildTag + "`n" +
+               "> *Git Sync Message:* " + $customMessage + "`n" +
+               "--------------------------------------------------" + "`n`n" +
+               "_Telemetry Sync Complete: " + $timestamp + "_"
 
-• *Operator:* Sujey Hariprasad
-• *Build Tag:* $buildTag
-• *Environment:* Local Cluster (default)
-• *Helm Release:* expo-web-release
-• *Commit Message:* $customMessage
-• *Access URL:* http://localhost  •  *Time Sync:* $timestamp
-"@
+# Create a native PowerShell body object
+$bodyObject = @{ text = $textPayload }
 
-# Build the payload object and compress it to JSON
-$payloadObject = @{ text = $textPayload }
-$jsonPayload = ConvertTo-Json $payloadObject -Compress
-
-# NEW: Save the payload out to a temporary local file using explicit UTF-8 encoding without BOM
-$tempPayloadPath = Join-Path $env:TEMP "slack_payload.json"
-
-[System.IO.File]::WriteAllText(
-    $tempPayloadPath,
-    $jsonPayload,
-    [System.Text.UTF8Encoding]::new($false)
-)
-
-# NEW: Tell curl to read directly from the file path using the '@' prefix
-curl.exe -X POST `
-  -H "Content-Type: application/json" `
-  --data-binary "@$tempPayloadPath" `
-  $slackWebhookUrl
-
-# Clean up the temporary payload file after execution
-if (Test-Path $tempPayloadPath) {
-    Remove-Item $tempPayloadPath -Force
+# Fire the webhook directly using native PowerShell memory processing
+try {
+    $response = Invoke-RestMethod -Uri $slackWebhookUrl -Method Post -Body ($bodyObject | ConvertTo-Json) -ContentType "application/json; charset=utf-8"
+} catch {
+    Write-Error "Slack API failed: $_"
 }
 
 Write-Output ""
