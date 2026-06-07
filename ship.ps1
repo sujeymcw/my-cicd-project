@@ -2,7 +2,10 @@
 $pipelineStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $buildTag = "local-" + (Get-Date -Format "yyyyMMdd-HHmmss")
 
-# Prompt the user for a custom commit message right at launch
+# Enable faster Docker BuildKit builds
+$env:DOCKER_BUILDKIT = "1"
+$dockerImageRepository = "sujeymcw/expo-web-app"
+
 Write-Output "--------------------------------------------------"
 $customMessage = Read-Host "Enter your commit/deployment message"
 Write-Output "--------------------------------------------------"
@@ -11,7 +14,6 @@ if ([string]::IsNullOrWhiteSpace($customMessage)) {
     $customMessage = "style: rapid telemetry interface deployment sync"
 }
 
-# Slack sender function to prevent invalid_payload errors
 function Send-SlackMessage([string]$messageText) {
     if (Test-Path "./webhook.json") {
         $settings = Get-Content "./webhook.json" | ConvertFrom-Json
@@ -31,7 +33,6 @@ function Send-SlackMessage([string]$messageText) {
     }
 }
 
-# HARD PORT CLEANER FUNCTION
 function Clear-Port8000 {
     Write-Output "PERFORMING HARD SCRUB ON PORT 8000..."
 
@@ -71,7 +72,6 @@ function Clear-Port8000 {
     }
 }
 
-# EXPO AUTOMATED PORT FUNCTION
 function Get-FreeExpoPort {
     $preferredPorts = @(8081, 8082, 8083, 8084, 8085, 8090, 8091, 8092, 19000, 19001, 19002)
 
@@ -87,11 +87,9 @@ function Get-FreeExpoPort {
 
 $expoPort = Get-FreeExpoPort
 
-# AUTOMATION 1: Aggressive process execution wipe to clear port 8000 permanently
 Write-Output "PERFORMING HARD SCRUB ON PORT 8000 AND LAUNCHING BACKEND..."
 Clear-Port8000
 
-# Spawn the separate window, set location strictly to the root project folder, and launch the backend cleanly
 Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'LAUNCHING CONTROL PLANE BACKEND BRIDGE ENGINE...' -ForegroundColor Cyan; python dashboard_backend.py"
 
 Write-Output "Waiting 5 seconds for backend API server to bind cleanly to port 8000..."
@@ -99,7 +97,6 @@ Start-Sleep -Seconds 5
 
 Write-Output "STARTING INSTANT GITOPS PIPELINE ROLLOUT..."
 
-# Reusable Emergency Gatekeeper Function for Pipeline Safety
 function Send-SlackFailure([string]$stageName, [string]$errorDetails) {
     $failPayload = "*=== KUBERNETES DEPLOYMENT CRITICAL FAILURE ===*" + "`n`n" +
                    "*Broken Stage:* " + $stageName + "`n" +
@@ -115,7 +112,6 @@ function Send-SlackFailure([string]$stageName, [string]$errorDetails) {
 
     Write-Error "CRITICAL: Pipeline halted during execution at $stageName."
 
-    # EMERGENCY FALLBACK: Navigate to 'src' in a separate window and open Expo for debugging
     Write-Output "LAUNCHING EXPO MOBILE INTERFACE CONSOLE IN SEPARATE POWERSHELL..."
     Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO MOBILE FRONTEND INTERFACE ON PORT $expoPort...' -ForegroundColor Blue; npx expo start -w --port $expoPort --non-interactive"
     Exit
@@ -140,32 +136,81 @@ if ($LASTEXITCODE -ne 0) {
     Send-SlackFailure "STAGE 1 (Git Sync)" "Repository push rejected or upstream remote server unavailable."
 }
 
-# 3. Stage 2: Compile and Inject Image with Live Disruption Interceptor Check
-Write-Output "STAGE 2 OF 5: Baking Docker Image layers directly into local cluster nodes..."
+# 3. Stage 2: Fast Fresh Docker Image Build
+Write-Output "STAGE 2 OF 5: Baking NEW Docker Image with high-speed cache acceleration..."
+
 try {
-    $disruptCheck = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/metrics" -Method Get -TimeoutSec 2
+    $disruptCheck = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/metrics" -Method Get -TimeoutSec 1
     if ($disruptCheck.chaosSimulationActive -eq $true -or $disruptCheck.disrupted -eq $true) {
         Write-Host ""
         Write-Host "!!! CHAOS INTERACTION DETECTED: Simulating Broken Docker Compilation !!!" -ForegroundColor Red
         Send-SlackFailure "STAGE 2 (Docker Build)" "Compilation failed inside the Dockerfile environment layers due to an armed infrastructure disruption."
     }
 } catch {
-    Write-Host "Metrics API bridge offline, proceeding with standard verification loop..." -ForegroundColor Yellow
+    Write-Host "Metrics API bridge offline, proceeding with Docker build..." -ForegroundColor Yellow
 }
 
-docker build -f ./Dockerfile -t sujeymcw/expo-web-app:$buildTag . --quiet
+$targetImage = "${dockerImageRepository}:$buildTag"
+
+Write-Host "Creating fresh Docker image: $targetImage" -ForegroundColor Cyan
+Write-Host "BuildKit cache acceleration enabled. Unchanged layers will complete much faster." -ForegroundColor Green
+
+docker build `
+    -f ./Dockerfile `
+    -t $targetImage `
+    --progress=plain `
+    .
+
 if ($LASTEXITCODE -ne 0) {
     Send-SlackFailure "STAGE 2 (Docker Build)" "Compilation failed inside the Dockerfile environment layers."
 }
 
+Write-Host "Fresh Docker image created successfully: $targetImage" -ForegroundColor Green
+
 # 4. Stage 3: Helm Chart Manifest Deployments
-Write-Output "STAGE 3 OF 5: Launching independent terminal for Helm Chart status outputs..."
-helm upgrade --install expo-web-release ./charts/my-web-app --set image.repository="sujeymcw/expo-web-app" --set image.tag=$buildTag --set image.imagePullPolicy="IfNotPresent" --set service.type="LoadBalancer" --set service.port=80 --namespace default > $null
+Write-Output "STAGE 3 OF 5: Deploying Helm Chart with clear output..."
+
+Write-Host "--------------------------------------------------" -ForegroundColor DarkGray
+Write-Host "HELM UPGRADE STARTED" -ForegroundColor Cyan
+Write-Host "Release Name : expo-web-release" -ForegroundColor White
+Write-Host "Chart Path   : ./charts/my-web-app" -ForegroundColor White
+Write-Host "Image Repo   : $dockerImageRepository" -ForegroundColor White
+Write-Host "Image Tag    : $buildTag" -ForegroundColor White
+Write-Host "Namespace    : default" -ForegroundColor White
+Write-Host "--------------------------------------------------" -ForegroundColor DarkGray
+
+helm upgrade --install expo-web-release ./charts/my-web-app `
+    --set image.repository="$dockerImageRepository" `
+    --set image.tag=$buildTag `
+    --set image.imagePullPolicy="IfNotPresent" `
+    --set service.type="LoadBalancer" `
+    --set service.port=80 `
+    --namespace default `
+    --debug
+
 if ($LASTEXITCODE -ne 0) {
     Send-SlackFailure "STAGE 3 (Helm Upgrade)" "Helm manifest configuration parsing rejected by the target cluster."
 }
 
-Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'MONITORING ACTIVE HELM RELEASE STATUS...' -ForegroundColor Green; helm status expo-web-release --namespace default"
+Write-Host "--------------------------------------------------" -ForegroundColor DarkGray
+Write-Host "HELM RELEASE STATUS" -ForegroundColor Cyan
+Write-Host "--------------------------------------------------" -ForegroundColor DarkGray
+
+helm status expo-web-release --namespace default
+
+Write-Host "--------------------------------------------------" -ForegroundColor DarkGray
+Write-Host "HELM RELEASE VALUES" -ForegroundColor Cyan
+Write-Host "--------------------------------------------------" -ForegroundColor DarkGray
+
+helm get values expo-web-release --namespace default
+
+Write-Host "--------------------------------------------------" -ForegroundColor DarkGray
+Write-Host "KUBERNETES RESOURCES CREATED BY HELM" -ForegroundColor Cyan
+Write-Host "--------------------------------------------------" -ForegroundColor DarkGray
+
+kubectl get all --namespace default
+
+Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'MONITORING ACTIVE HELM RELEASE STATUS...' -ForegroundColor Green; helm status expo-web-release --namespace default; Write-Host ''; Write-Host 'ACTIVE PODS AND SERVICES:' -ForegroundColor Cyan; kubectl get all --namespace default"
 
 # 5. Stage 4: Kubectl Rolling Pod Update
 Write-Output "STAGE 4 OF 5: Triggering instantaneous rolling update on cluster pods..."
@@ -173,6 +218,8 @@ kubectl rollout restart deployment/expo-web-deployment --namespace default
 if ($LASTEXITCODE -ne 0) {
     Send-SlackFailure "STAGE 4 (Kubectl Rollout)" "Deployment target missing or pod template scheduling initialization failed."
 }
+
+kubectl rollout status deployment/expo-web-deployment --namespace default
 
 # 6. Active Network Probing Check
 Write-Output "RUNNING OPERATIONAL ENVIRONMENT HEALTH CHECK..."
@@ -185,7 +232,6 @@ if ($portCheck.TcpTestSucceeded) {
     $healthStatus = "WARNING (Port 80 not responding yet)"
 }
 
-# Stop execution timer and calculate performance benchmarking speeds
 $pipelineStopwatch.Stop()
 $executionDuration = [math]::Round($pipelineStopwatch.Elapsed.TotalSeconds, 2)
 $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -205,6 +251,7 @@ $textPayload = "*=== KUBERNETES DEPLOYMENT ROLLOUT SUCCESSFUL ===*" + "`n`n" +
                "> *Cluster Environment:* Local Desktop Node (default)" + "`n" +
                "> *Helm Chart Release:* expo-web-release" + "`n" +
                "> *Unique Build Tag:* " + $buildTag + "`n" +
+               "> *Docker Image:* " + $targetImage + "`n" +
                "> *Git Sync Message:* " + $customMessage + "`n" +
                "--------------------------------------------------" + "`n`n" +
                "_Telemetry Sync Complete: " + $timestamp + "_"
@@ -217,8 +264,8 @@ try {
 
 Write-Output ""
 Write-Output "SUCCESS: Local server is updated. Total pipeline execution velocity: $executionDuration seconds."
+Write-Output "Fresh Docker image created: $targetImage"
 Write-Output "--------------------------------------------------"
 
-# AUTOMATION 2: Open Expo development suite completely inside its standalone window environment tail
 Write-Output "LAUNCHING EXPO MOBILE INTERFACE CONSOLE IN SEPARATE POWERSHELL..."
 Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING FRONTEND INTERFACE ON PORT $expoPort...' -ForegroundColor Blue; npx expo start -w --port $expoPort --non-interactive"
