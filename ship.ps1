@@ -33,7 +33,7 @@ Write-Output "STAGE 4 OF 5: Triggering instantaneous rolling update on cluster p
 kubectl rollout restart deployment/expo-web-deployment --namespace default
 
 # 6. Shoot the Automated Slack Telemetry Card to your Sandbox Channel
-Write-Output "STAGE 5 OF 5: Dispatching instant telemetry alert to Slack via curl..."
+Write-Output "STAGE 5 OF 5: Dispatching instant telemetry alert to Slack via curl stream..."
 
 # Dynamically parse the secret webhook from your untracked local file
 if (Test-Path "./webhook.json") {
@@ -58,11 +58,19 @@ The local Kubernetes cluster environment has successfully processed a rolling up
 • *Access URL:* http://localhost  •  *Time Sync:* $timestamp
 "@
 
-# Safely escape any problematic double-quotes inside the user's custom commit message
-$jsonPayload = @{ text = $textPayload } | ConvertTo-Json -Compress
+# Build the payload object and compress it to JSON
+$payloadObject = @{ text = $textPayload }
+$jsonPayload = ConvertTo-Json $payloadObject -Compress
 
-# Use native curl.exe with exact headers to send the compressed payload cleanly
-curl.exe -X POST -H "Content-type: application/json" --data $jsonPayload $slackWebhookUrl
+# NEW: Save the payload out to a temporary local file using explicit UTF-8 encoding
+$tempPayloadPath = Join-Path $env:TEMP "slack_payload.json"
+Out-File -FilePath $tempPayloadPath -InputObject $jsonPayload -Encoding utf8 -Force
+
+# NEW: Tell curl to read directly from the file path using the '@' prefix (bypasses CLI quote parsing)
+curl.exe -X POST -H "Content-type: application/json" --data "@$tempPayloadPath" $slackWebhookUrl
+
+# Clean up the temporary payload file after execution
+if (Test-Path $tempPayloadPath) { Remove-Item $tempPayloadPath -Force }
 
 Write-Output ""
 Write-Output "SUCCESS: Local server is updated. Inspect the newly opened Helm terminal and refresh your Control Plane UI!"
