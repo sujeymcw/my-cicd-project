@@ -11,8 +11,15 @@ if ([string]::IsNullOrWhiteSpace($customMessage)) {
     $customMessage = "style: rapid telemetry interface deployment sync"
 }
 
-# AUTOMATION 1: Spawn a separate window, navigate to root project, and execute the backend
-Write-Output "LAUNCHING PYTHON BACKEND SYSTEM IN SEPARATE POWERSHELL..."
+# AUTOMATION 1: Clear out port 8000 to prevent errors, then spawn the Python backend natively in the root directory
+Write-Output "CLEARING PORT 8000 AND LAUNCHING BACKEND IN ROOT PROJECT DIR..."
+try {
+    # Find and terminate whatever is squatting on port 8000 to prevent WinError 10048
+    $oldProcess = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -First 1
+    if ($oldProcess) { Stop-Process -Id $oldProcess -Force -ErrorAction SilentlyContinue }
+} catch {}
+
+# Spawn a separate window, set location strictly to the root project folder, and launch the backend
 Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'LAUNCHING CONTROL PLANE BACKEND BRIDGE ENGINE...' -ForegroundColor Cyan; python dashboard_backend.py"
 
 Write-Output "Waiting 3 seconds for backend API server to bind cleanly to port 8000..."
@@ -125,6 +132,6 @@ Write-Output ""
 Write-Output "SUCCESS: Local server is updated. Total pipeline execution velocity: $executionDuration seconds."
 Write-Output "--------------------------------------------------"
 
-# AUTOMATION 2: Fixed to navigate directly into the 'src' subfolder before initiating npx expo start
+# AUTOMATION 2: Keep navigating directly into the 'src' subfolder before initiating npx expo start
 Write-Output "LAUNCHING EXPO MOBILE INTERFACE CONSOLE IN SEPARATE POWERSHELL..."
 Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO MOBILE FRONTEND INTERFACE...' -ForegroundColor Blue; npx expo start -w"
