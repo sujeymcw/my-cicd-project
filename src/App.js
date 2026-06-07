@@ -7,7 +7,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // New Interactive State Additions
+  // Interactive State Additions
   const [isDisrupted, setIsDisrupted] = useState(false);
   const [isRollingBack, setIsRollingBack] = useState(false);
   const [showRollbackDrawer, setShowRollbackDrawer] = useState(false);
@@ -18,7 +18,19 @@ export default function App() {
     fetch('http://127.0.0.1:8000/api/metrics')
       .then((res) => res.json())
       .then((json) => {
-        setData(json);
+        // Automatically sync the switch position if backend already has a state saved
+        if (json.disrupted !== undefined) {
+          setIsDisrupted(json.disrupted);
+        } else if (json.chaosSimulationActive !== undefined) {
+          setIsDisrupted(json.chaosSimulationActive);
+        }
+        
+        // Inject the live switch state into data object to ensure absolute local fallback sync stability
+        setData({
+          ...json,
+          disrupted: json.disrupted ?? isDisrupted,
+          chaosSimulationActive: json.chaosSimulationActive ?? isDisrupted
+        });
         setLoading(false);
       })
       .catch((err) => {
@@ -31,7 +43,6 @@ export default function App() {
     if (!data) return;
     
     // Optimistically set status to pending/cycling
-    const originalStatus = data.cluster.status;
     setData(prev => ({
       ...prev,
       cluster: {
@@ -83,18 +94,25 @@ export default function App() {
   const toggleDisruptionGate = (value) => {
     setIsDisrupted(value);
     
-    // Optionally fire an immediate telemetry post to Python backend to change operational metrics
+    // Explicitly update data state fields instantly so local API reads are bulletproof
+    setData(prev => prev ? {
+      ...prev,
+      disrupted: value,
+      chaosSimulationActive: value
+    } : null);
+    
+    // Fire telemetry post to Python backend to alter the pipeline flag state
     fetch('http://127.0.0.1:8000/api/disrupt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ disrupted: value })
+      body: JSON.stringify({ disrupted: value, chaosSimulationActive: value })
     })
     .then(() => {
       const stateMsg = value ? "Pipeline disruption flag armed. Next push will fail." : "Pipeline safe. Disruption flags cleared.";
       Alert.alert("Chaos Engineering Lab", stateMsg);
     })
     .catch(() => {
-      // Graceful fallback if backend endpoint isn't fully bound yet
+      // Graceful local fallback alert if endpoint isn't fully listening
       Alert.alert("Chaos Engineering Lab", value ? "Disruption simulation active locally." : "Disruption simulation stopped.");
     });
   };
@@ -204,7 +222,7 @@ export default function App() {
           {showRollbackDrawer && (
             <View style={styles.fullWidthCard}>
               <Text style={[styles.cardTitle, { color: '#2196F3' }]}>⏪ GitOps Version Rollback Engine</Text>
-              <Text style={[styles.label, { marginBottom: 14 }]}>Select target deployment history checkpoint:</Text>
+              <Text style={[styles.label, { grandfatheredMargin: 14, marginBottom: 14 }]}>Select target deployment history checkpoint:</Text>
               
               <View style={styles.versionSelectorRow}>
                 {['v1.0.0', 'v0.9.9', 'v0.9.8'].map((version) => (
