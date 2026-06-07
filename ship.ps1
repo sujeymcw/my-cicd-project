@@ -14,7 +14,8 @@ $dockerImage = "sujeymcw/expo-web-app"
 $helmRelease = "expo-web-release"
 $helmChartPath = "./charts/my-web-app"
 $namespace = "default"
-$outputYaml = "./helm-kubernetes-output.yaml"
+$helmReportFile = "./helm-deployment-report.txt"
+$renderedManifestFile = "./rendered-manifest.yaml"
 
 function Send-SlackMessage([string]$messageText) {
     if (Test-Path "./webhook.json") {
@@ -136,147 +137,225 @@ function Ensure-MetricsServer {
     Write-Host "Metrics Server enabled, but API is still warming up." -ForegroundColor Yellow
 }
 
-function Write-HelmStyleYamlOutput {
+function Write-DevOpsHelmReport {
     param (
         [string]$ImageName,
         [string]$ImageTag
     )
 
-    $deployedImage = kubectl get deployment expo-web-deployment --namespace $namespace -o=jsonpath="{.spec.template.spec.containers[*].image}" 2>$null
-    $runningPods = kubectl get pods --namespace $namespace --no-headers 2>$null | Select-String "Running"
-    $podCount = @($runningPods).Count
+    Write-Host ""
+    Write-Host "GENERATING REAL DEVOPS HELM REPORT..." -ForegroundColor Cyan
 
-    $helmStatusText = helm status $helmRelease --namespace $namespace 2>$null | Out-String
-    $helmValuesText = helm get values $helmRelease --namespace $namespace 2>$null | Out-String
-    $podsText = kubectl get pods --namespace $namespace -o wide 2>$null | Out-String
-    $svcText = kubectl get svc --namespace $namespace -o wide 2>$null | Out-String
-    $deployText = kubectl get deployment expo-web-deployment --namespace $namespace -o wide 2>$null | Out-String
-    $topPodsText = kubectl top pods --namespace $namespace 2>$null | Out-String
-    $topNodesText = kubectl top nodes 2>$null | Out-String
+    helm template $helmRelease $helmChartPath `
+        --set image.repository="$ImageName" `
+        --set image.tag="$ImageTag" `
+        --set image.imagePullPolicy="IfNotPresent" `
+        --set service.type="LoadBalancer" `
+        --set service.port=80 `
+        --namespace $namespace > $renderedManifestFile
 
 @"
-apiVersion: helm.cicd.demo/v1
-kind: HelmKubernetesPipelineOutput
-metadata:
-  releaseName: $helmRelease
-  namespace: $namespace
-  generatedAt: "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-spec:
-  workflow:
-    - Git Push
-    - Build Image
-    - Push Registry
-    - Helm Upgrade
-    - Kubernetes Deployment
+============================================================
+REAL DEVOPS HELM DEPLOYMENT REPORT
+============================================================
 
-  stack:
-    - GitHub Actions
-    - Docker
-    - Kubernetes
-    - Helm
+Generated At       : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+Namespace          : $namespace
+Helm Release       : $helmRelease
+Helm Chart Path    : $helmChartPath
+Docker Image       : ${ImageName}:${ImageTag}
+Rendered Manifest  : $renderedManifestFile
 
-  docker:
-    imageGenerated: "${ImageName}:${ImageTag}"
-    repository: "$ImageName"
-    tag: "$ImageTag"
+============================================================
+WORKFLOW
+============================================================
 
-  helm:
-    release: "$helmRelease"
-    chartPath: "$helmChartPath"
+Git Push
+   ↓
+Build Image
+   ↓
+Push Registry
+   ↓
+Helm Upgrade
+   ↓
+Kubernetes Deployment
 
-  kubernetes:
-    deployment: "expo-web-deployment"
-    deployedImage: "$deployedImage"
-    runningPods: $podCount
+============================================================
+HELM LIST
+============================================================
 
-statusOutput:
-  helmStatus: |
-$($helmStatusText -split "`n" | ForEach-Object { "    $_" } | Out-String)
+"@ | Set-Content $helmReportFile -Encoding UTF8
 
-  helmValues: |
-$($helmValuesText -split "`n" | ForEach-Object { "    $_" } | Out-String)
+    helm list --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
 
-  deployment: |
-$($deployText -split "`n" | ForEach-Object { "    $_" } | Out-String)
+@"
 
-  pods: |
-$($podsText -split "`n" | ForEach-Object { "    $_" } | Out-String)
+============================================================
+HELM STATUS
+============================================================
 
-  services: |
-$($svcText -split "`n" | ForEach-Object { "    $_" } | Out-String)
+"@ | Out-File $helmReportFile -Append -Encoding UTF8
 
-  podMetrics: |
-$($topPodsText -split "`n" | ForEach-Object { "    $_" } | Out-String)
+    helm status $helmRelease --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
 
-  nodeMetrics: |
-$($topNodesText -split "`n" | ForEach-Object { "    $_" } | Out-String)
-"@ | Set-Content $outputYaml -Encoding UTF8
+@"
 
-    Write-Host ""
-    Write-Host "HELM-STYLE YAML OUTPUT GENERATED:" -ForegroundColor Green
-    Write-Host $outputYaml -ForegroundColor Cyan
+============================================================
+HELM VALUES
+============================================================
+
+"@ | Out-File $helmReportFile -Append -Encoding UTF8
+
+    helm get values $helmRelease --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
+
+@"
+
+============================================================
+HELM MANIFEST
+============================================================
+
+"@ | Out-File $helmReportFile -Append -Encoding UTF8
+
+    helm get manifest $helmRelease --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
+
+@"
+
+============================================================
+HELM ALL
+============================================================
+
+"@ | Out-File $helmReportFile -Append -Encoding UTF8
+
+    helm get all $helmRelease --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
+
+@"
+
+============================================================
+KUBERNETES DEPLOYMENT
+============================================================
+
+"@ | Out-File $helmReportFile -Append -Encoding UTF8
+
+    kubectl get deployment expo-web-deployment --namespace $namespace -o wide | Out-File $helmReportFile -Append -Encoding UTF8
+
+@"
+
+============================================================
+KUBERNETES PODS
+============================================================
+
+"@ | Out-File $helmReportFile -Append -Encoding UTF8
+
+    kubectl get pods --namespace $namespace -o wide | Out-File $helmReportFile -Append -Encoding UTF8
+
+@"
+
+============================================================
+KUBERNETES SERVICES
+============================================================
+
+"@ | Out-File $helmReportFile -Append -Encoding UTF8
+
+    kubectl get svc --namespace $namespace -o wide | Out-File $helmReportFile -Append -Encoding UTF8
+
+@"
+
+============================================================
+KUBERNETES ROLLOUT STATUS
+============================================================
+
+"@ | Out-File $helmReportFile -Append -Encoding UTF8
+
+    kubectl rollout status deployment/expo-web-deployment --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
+
+@"
+
+============================================================
+POD CPU AND MEMORY METRICS
+============================================================
+
+"@ | Out-File $helmReportFile -Append -Encoding UTF8
+
+    kubectl top pods --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
+
+@"
+
+============================================================
+NODE CPU AND MEMORY METRICS
+============================================================
+
+"@ | Out-File $helmReportFile -Append -Encoding UTF8
+
+    kubectl top nodes | Out-File $helmReportFile -Append -Encoding UTF8
+
+    Write-Host "DevOps Helm report generated successfully:" -ForegroundColor Green
+    Write-Host $helmReportFile -ForegroundColor Cyan
+
+    Write-Host "Rendered Kubernetes manifest generated:" -ForegroundColor Green
+    Write-Host $renderedManifestFile -ForegroundColor Cyan
 }
 
-function Show-KubernetesTelemetry {
+function Show-DevOpsHelmOutput {
     param (
         [string]$ImageName,
         [string]$ImageTag
     )
 
     Write-Host ""
-    Write-Host "================ HELM + KUBERNETES LIVE OUTPUT ================" -ForegroundColor Cyan
-    Write-Host "Docker Image Generated : ${ImageName}:${ImageTag}" -ForegroundColor Green
-    Write-Host "Helm Release           : $helmRelease" -ForegroundColor Green
-    Write-Host "Namespace              : $namespace" -ForegroundColor Green
-    Write-Host "YAML Output File       : $outputYaml" -ForegroundColor Green
-    Write-Host "===============================================================" -ForegroundColor Cyan
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host "REAL DEVOPS HELM CHART DEPLOYMENT OUTPUT" -ForegroundColor Cyan
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host "Docker Image       : ${ImageName}:${ImageTag}" -ForegroundColor Green
+    Write-Host "Helm Release       : $helmRelease" -ForegroundColor Green
+    Write-Host "Namespace          : $namespace" -ForegroundColor Green
+    Write-Host "Helm Report File   : $helmReportFile" -ForegroundColor Green
+    Write-Host "Rendered Manifest  : $renderedManifestFile" -ForegroundColor Green
+    Write-Host "============================================================" -ForegroundColor Cyan
 
     Write-Host ""
-    Write-Host "HELM RELEASE STATUS:" -ForegroundColor Yellow
+    Write-Host "HELM LIST:" -ForegroundColor Yellow
+    helm list --namespace $namespace
+
+    Write-Host ""
+    Write-Host "HELM STATUS:" -ForegroundColor Yellow
     helm status $helmRelease --namespace $namespace
 
     Write-Host ""
-    Write-Host "HELM VALUES IMAGE CONFIG:" -ForegroundColor Yellow
+    Write-Host "HELM VALUES:" -ForegroundColor Yellow
     helm get values $helmRelease --namespace $namespace
 
     Write-Host ""
-    Write-Host "DEPLOYED DOCKER IMAGE INSIDE KUBERNETES:" -ForegroundColor Yellow
-    kubectl get deployment expo-web-deployment --namespace $namespace -o=jsonpath="{.spec.template.spec.containers[*].image}"
-    Write-Host ""
-
-    Write-Host ""
-    Write-Host "KUBERNETES DEPLOYMENT STATUS:" -ForegroundColor Yellow
+    Write-Host "KUBERNETES DEPLOYMENT:" -ForegroundColor Yellow
     kubectl get deployment expo-web-deployment --namespace $namespace -o wide
 
     Write-Host ""
-    Write-Host "PODS CURRENTLY USED:" -ForegroundColor Yellow
+    Write-Host "KUBERNETES PODS:" -ForegroundColor Yellow
     kubectl get pods --namespace $namespace -o wide
 
     Write-Host ""
-    Write-Host "SERVICE DETAILS:" -ForegroundColor Yellow
+    Write-Host "KUBERNETES SERVICES:" -ForegroundColor Yellow
     kubectl get svc --namespace $namespace -o wide
 
     Write-Host ""
-    Write-Host "CPU AND MEMORY USAGE:" -ForegroundColor Yellow
+    Write-Host "KUBERNETES ROLLOUT STATUS:" -ForegroundColor Yellow
+    kubectl rollout status deployment/expo-web-deployment --namespace $namespace
+
+    Write-Host ""
+    Write-Host "POD CPU AND MEMORY METRICS:" -ForegroundColor Yellow
     kubectl top pods --namespace $namespace
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host ""
-        Write-Host "Live metrics still unavailable. Showing resource requests and limits instead:" -ForegroundColor Yellow
+        Write-Host "Metrics still warming up. Showing deployment resource requests and limits:" -ForegroundColor Yellow
         kubectl describe deployment expo-web-deployment --namespace $namespace | Select-String "Limits|Requests|cpu|memory"
     }
 
     Write-Host ""
-    Write-Host "NODE MEMORY AND CPU USAGE:" -ForegroundColor Yellow
+    Write-Host "NODE CPU AND MEMORY METRICS:" -ForegroundColor Yellow
     kubectl top nodes
 
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host ""
-        Write-Host "Node live metrics still unavailable. Metrics Server may still be warming up." -ForegroundColor Yellow
-    }
-
     Write-Host ""
-    Write-Host "===============================================================" -ForegroundColor Cyan
+    Write-Host "============================================================" -ForegroundColor Cyan
 }
 
 Write-Output "PERFORMING HARD SCRUB ON PORT 8000 AND LAUNCHING BACKEND..."
@@ -395,15 +474,15 @@ if ($LASTEXITCODE -ne 0) {
     Send-SlackFailure "STAGE 4 (Kubernetes Rollout)" "Deployment did not become ready within timeout."
 }
 
-Write-Output "STAGE 5 OF 5: Showing Helm-style output and generating YAML file..."
+Write-Output "STAGE 5 OF 5: Showing real DevOps Helm chart output..."
 
-Write-HelmStyleYamlOutput -ImageName $dockerImage -ImageTag $buildTag
-Show-KubernetesTelemetry -ImageName $dockerImage -ImageTag $buildTag
+Write-DevOpsHelmReport -ImageName $dockerImage -ImageTag $buildTag
+Show-DevOpsHelmOutput -ImageName $dockerImage -ImageTag $buildTag
 
 Start-Process powershell.exe -ArgumentList @(
     "-NoExit",
     "-Command",
-    "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'LIVE HELM + KUBERNETES DEPLOYMENT OUTPUT' -ForegroundColor Cyan; Write-Host 'Docker Image: ${dockerImage}:$buildTag' -ForegroundColor Green; Write-Host ''; Write-Host 'HELM STATUS:' -ForegroundColor Yellow; helm status $helmRelease --namespace $namespace; Write-Host ''; Write-Host 'DEPLOYED IMAGE:' -ForegroundColor Yellow; kubectl get deployment expo-web-deployment --namespace $namespace -o=jsonpath='{.spec.template.spec.containers[*].image}'; Write-Host ''; Write-Host ''; Write-Host 'PODS:' -ForegroundColor Yellow; kubectl get pods --namespace $namespace -o wide; Write-Host ''; Write-Host 'SERVICES:' -ForegroundColor Yellow; kubectl get svc --namespace $namespace -o wide; Write-Host ''; Write-Host 'MEMORY AND CPU USAGE:' -ForegroundColor Yellow; kubectl top pods --namespace $namespace; Write-Host ''; Write-Host 'NODE MEMORY AND CPU USAGE:' -ForegroundColor Yellow; kubectl top nodes; Write-Host ''; Write-Host 'YAML OUTPUT FILE:' -ForegroundColor Green; Get-Content '$outputYaml'"
+    "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'REAL DEVOPS HELM DEPLOYMENT OUTPUT' -ForegroundColor Cyan; Write-Host ''; Write-Host 'HELM LIST:' -ForegroundColor Yellow; helm list --namespace $namespace; Write-Host ''; Write-Host 'HELM STATUS:' -ForegroundColor Yellow; helm status $helmRelease --namespace $namespace; Write-Host ''; Write-Host 'HELM VALUES:' -ForegroundColor Yellow; helm get values $helmRelease --namespace $namespace; Write-Host ''; Write-Host 'KUBERNETES PODS:' -ForegroundColor Yellow; kubectl get pods --namespace $namespace -o wide; Write-Host ''; Write-Host 'KUBERNETES SERVICES:' -ForegroundColor Yellow; kubectl get svc --namespace $namespace -o wide; Write-Host ''; Write-Host 'POD CPU AND MEMORY METRICS:' -ForegroundColor Yellow; kubectl top pods --namespace $namespace; Write-Host ''; Write-Host 'NODE CPU AND MEMORY METRICS:' -ForegroundColor Yellow; kubectl top nodes; Write-Host ''; Write-Host 'FULL HELM REPORT FILE:' -ForegroundColor Green; Write-Host '$helmReportFile'; Write-Host ''; Write-Host 'RENDERED MANIFEST FILE:' -ForegroundColor Green; Write-Host '$renderedManifestFile'"
 )
 
 Write-Output "RUNNING OPERATIONAL ENVIRONMENT HEALTH CHECK..."
@@ -431,8 +510,9 @@ $textPayload = "*=== KUBERNETES DEPLOYMENT ROLLOUT SUCCESSFUL ===*" + "`n`n" +
                "*Docker Image Generated:* " + "${dockerImage}:$buildTag" + "`n" +
                "*Cluster Health Check:* " + $healthStatus + "`n" +
                "*Running Pods:* " + $podCount + "`n" +
-               "*Helm Output YAML:* " + $outputYaml + "`n" +
-               "*Memory/CPU Usage:* Check Helm telemetry terminal" + "`n" +
+               "*Helm Report File:* " + $helmReportFile + "`n" +
+               "*Rendered Manifest File:* " + $renderedManifestFile + "`n" +
+               "*Memory/CPU Usage:* Check DevOps Helm terminal" + "`n" +
                "*Total Processing Velocity:* " + $executionDuration + " seconds" + "`n" +
                "*Local Endpoint URL:* http://localhost" + "`n" +
                "*Expo Frontend Port:* " + $expoPort + "`n`n" +
@@ -456,7 +536,8 @@ Write-Output ""
 Write-Output "SUCCESS: Git push completed, Docker image created, registry/minikube image updated, Helm upgraded, and Kubernetes deployed."
 Write-Output "Docker Image Generated: ${dockerImage}:$buildTag"
 Write-Output "Running Pods: $podCount"
-Write-Output "Helm Output YAML: $outputYaml"
+Write-Output "Full Helm Report: $helmReportFile"
+Write-Output "Rendered Manifest: $renderedManifestFile"
 Write-Output "Total pipeline execution velocity: $executionDuration seconds."
 Write-Output "--------------------------------------------------"
 
