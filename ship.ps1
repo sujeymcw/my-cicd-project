@@ -11,9 +11,9 @@ if ([string]::IsNullOrWhiteSpace($customMessage)) {
     $customMessage = "style: rapid telemetry interface deployment sync"
 }
 
-# IMMEDIATE AUTOMATION: Spawn a separate, independent, visible PowerShell window to run your Python API backend
+# AUTOMATION 1: Spawn a separate window, navigate to root project, and execute the backend
 Write-Output "LAUNCHING PYTHON BACKEND SYSTEM IN SEPARATE POWERSHELL..."
-Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Write-Host 'LAUNCHING CONTROL PLANE BACKEND BRIDGE ENGINE...' -ForegroundColor Cyan; python dashboard_backend.py"
+Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'LAUNCHING CONTROL PLANE BACKEND BRIDGE ENGINE...' -ForegroundColor Cyan; python dashboard_backend.py"
 
 Write-Output "Waiting 3 seconds for backend API server to bind cleanly to port 8000..."
 Start-Sleep -Seconds 3
@@ -34,9 +34,9 @@ function Send-SlackFailure([string]$stageName, [string]$errorDetails) {
     }
     Write-Error "CRITICAL: Pipeline halted during execution at $stageName."
     
-    # EMERGENCY FALLBACK: Even if the pipeline breaks, still launch the Expo frontend window for debugging!
+    # EMERGENCY FALLBACK: Navigate to 'src' in a separate window and open Expo for debugging
     Write-Output "LAUNCHING EXPO MOBILE INTERFACE CONSOLE IN SEPARATE POWERSHELL..."
-    Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Write-Host 'LAUNCHING EXPO MOBILE FRONTEND INTERFACE...' -ForegroundColor Blue; npx expo start -w"
+    Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO MOBILE FRONTEND INTERFACE...' -ForegroundColor Blue; npx expo start -w"
     Exit
 }
 
@@ -67,7 +67,7 @@ if (-not $?) { Send-SlackFailure "STAGE 2 (Docker Build)" "Compilation failed in
 Write-Output "STAGE 3 OF 5: Launching independent terminal for Helm Chart status outputs..."
 helm upgrade --install expo-web-release ./charts/my-web-app --set image.repository="sujeymcw/expo-web-app" --set image.tag=$buildTag --set image.imagePullPolicy="IfNotPresent" --set service.type="LoadBalancer" --set service.port=80 --namespace default > $null
 if (-not $?) { Send-SlackFailure "STAGE 3 (Helm Upgrade)" "Helm manifest configuration parsing rejected by the target cluster." }
-Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Write-Host 'MONITORING ACTIVE HELM RELEASE STATUS...' -ForegroundColor Green; helm status expo-web-release --namespace default"
+Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'MONITORING ACTIVE HELM RELEASE STATUS...' -ForegroundColor Green; helm status expo-web-release --namespace default"
 
 # 5. Stage 4: Kubectl Rolling Pod Update
 Write-Output "STAGE 4 OF 5: Triggering instantaneous rolling update on cluster pods..."
@@ -125,6 +125,6 @@ Write-Output ""
 Write-Output "SUCCESS: Local server is updated. Total pipeline execution velocity: $executionDuration seconds."
 Write-Output "--------------------------------------------------"
 
-# FINAL STEP AUTOMATION: Spawn another fresh, separate PowerShell window to boot your frontend app and load it inside the browser automatically
+# AUTOMATION 2: Fixed to navigate directly into the 'src' subfolder before initiating npx expo start
 Write-Output "LAUNCHING EXPO MOBILE INTERFACE CONSOLE IN SEPARATE POWERSHELL..."
-Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Write-Host 'LAUNCHING EXPO MOBILE FRONTEND INTERFACE...' -ForegroundColor Blue; npx expo start -w"
+Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO MOBILE FRONTEND INTERFACE...' -ForegroundColor Blue; npx expo start -w"
