@@ -60,7 +60,7 @@ jobs:
           path: ./helm-chart-output.yaml
           retention-days: 7
 
-      # 4. Shoot the Automated Slack Telemetry Card directly using a hardcoded endpoint configuration
+      # 4. Shoot the Automated Slack Telemetry Card securely using a hidden secret context reference
       - name: Dispatch Cloud Telemetry Alert to Slack
         uses: slackapi/slack-github-action@v1.26.0
         with:
@@ -68,4 +68,4 @@ jobs:
             {
               "text": "*=== GITHUB ACTIONS CLOUD ROLLOUT SUCCESSFUL ===*\n\n*Deployment Status:* Active & Shipped\n*Docker Image:* `${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}`\n\n--------------------------------------------------\n*PIPELINE METRICS LOGS*\n> *Triggered By Operator:* ${{ github.actor }}\n> *Branch Engine Context:* ${{ github.ref_name }}\n> *Commit Message Check:* \"${{ github.event.head_commit.message }}\"\n--------------------------------------------------\n\n_Cloud Telemetry Sync Complete_"
         env:
-          SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/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"
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
