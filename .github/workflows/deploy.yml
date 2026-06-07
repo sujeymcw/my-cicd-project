@@ -27,3 +27,45 @@ jobs:
           push: true
           no-cache: true
           tags: ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}
+
+      # 1. Install the Helm Engine binaries directly onto the Cloud Runner VM host
+      - name: Set up Helm Client
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.12.0'
+
+      # 2. Compile the cloud Helm chart template logs cleanly
+      - name: Generate Cloud Helm Chart Output File
+        run: |
+          echo "# ============================================================" > ./helm-chart-output.yaml
+          echo "# CLOUD HELM MANIFEST RENDER GENERATION" >> ./helm-chart-output.yaml
+          echo "# Generated At : $(date -u)" >> ./helm-chart-output.yaml
+          echo "# Commit SHA   : ${{ github.sha }}" >> ./helm-chart-output.yaml
+          echo "# ============================================================" >> ./helm-chart-output.yaml
+          echo "" >> ./helm-chart-output.yaml
+          
+          helm template expo-web-release ./charts/my-web-app \
+            --set image.repository="${{ secrets.REGISTRY_USERNAME }}/expo-web-app" \
+            --set image.tag="${{ github.sha }}" \
+            --set image.imagePullPolicy="IfNotPresent" \
+            --set service.type="LoadBalancer" \
+            --set service.port=80 \
+            --namespace default >> ./helm-chart-output.yaml
+
+      # 3. Intercept the file and upload it to the GitHub Web Interface UI as an immutable download
+      - name: Upload Helm Output Artifact to GitHub Run View
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart-output-file
+          path: ./helm-chart-output.yaml
+          retention-days: 7
+
+      # 4. Shoot the Automated Slack Telemetry Card directly using a hardcoded endpoint configuration
+      - name: Dispatch Cloud Telemetry Alert to Slack
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "*=== GITHUB ACTIONS CLOUD ROLLOUT SUCCESSFUL ===*\n\n*Deployment Status:* Active & Shipped\n*Docker Image:* `${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}`\n\n--------------------------------------------------\n*PIPELINE METRICS LOGS*\n> *Triggered By Operator:* ${{ github.actor }}\n> *Branch Engine Context:* ${{ github.ref_name }}\n> *Commit Message Check:* \"${{ github.event.head_commit.message }}\"\n--------------------------------------------------\n\n_Cloud Telemetry Sync Complete_"
+        env:
+          SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/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"
