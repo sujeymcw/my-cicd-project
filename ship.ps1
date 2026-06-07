@@ -71,6 +71,22 @@ function Clear-Port8000 {
     }
 }
 
+# EXPO AUTOMATED PORT FUNCTION
+function Get-FreeExpoPort {
+    $preferredPorts = @(8081, 8082, 8083, 8084, 8085, 8090, 8091, 8092, 19000, 19001, 19002)
+
+    foreach ($expoPort in $preferredPorts) {
+        $portUsed = Get-NetTCPConnection -LocalPort $expoPort -ErrorAction SilentlyContinue
+        if (-not $portUsed) {
+            return $expoPort
+        }
+    }
+
+    return 8099
+}
+
+$expoPort = Get-FreeExpoPort
+
 # AUTOMATION 1: Aggressive process execution wipe to clear port 8000 permanently
 Write-Output "PERFORMING HARD SCRUB ON PORT 8000 AND LAUNCHING BACKEND..."
 Clear-Port8000
@@ -101,7 +117,7 @@ function Send-SlackFailure([string]$stageName, [string]$errorDetails) {
 
     # EMERGENCY FALLBACK: Navigate to 'src' in a separate window and open Expo for debugging
     Write-Output "LAUNCHING EXPO MOBILE INTERFACE CONSOLE IN SEPARATE POWERSHELL..."
-    Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO MOBILE FRONTEND INTERFACE...' -ForegroundColor Blue; npx expo start -w"
+    Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO MOBILE FRONTEND INTERFACE ON PORT $expoPort...' -ForegroundColor Blue; npx expo start -w --port $expoPort --non-interactive"
     Exit
 }
 
@@ -181,7 +197,8 @@ $textPayload = "*=== KUBERNETES DEPLOYMENT ROLLOUT SUCCESSFUL ===*" + "`n`n" +
                "*Deployment Status:* Active & Rolling" + "`n" +
                "*Cluster Health Check:* " + $healthStatus + "`n" +
                "*Total Processing Velocity:* " + $executionDuration + " seconds" + "`n" +
-               "*Local Endpoint URL:* http://localhost" + "`n`n" +
+               "*Local Endpoint URL:* http://localhost" + "`n" +
+               "*Expo Frontend Port:* " + $expoPort + "`n`n" +
                "--------------------------------------------------" + "`n" +
                "*PIPELINE METRICS LOGS*" + "`n" +
                "> *Operator:* Sujey Hariprasad" + "`n" +
@@ -204,4 +221,4 @@ Write-Output "--------------------------------------------------"
 
 # AUTOMATION 2: Open Expo development suite completely inside its standalone window environment tail
 Write-Output "LAUNCHING EXPO MOBILE INTERFACE CONSOLE IN SEPARATE POWERSHELL..."
-Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO MOBILE FRONTEND INTERFACE...' -ForegroundColor Blue; npx expo start -w"
+Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING FRONTEND INTERFACE ON PORT $expoPort...' -ForegroundColor Blue; npx expo start -w --port $expoPort --non-interactive"
