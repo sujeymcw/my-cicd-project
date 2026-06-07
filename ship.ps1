@@ -62,15 +62,25 @@ The local Kubernetes cluster environment has successfully processed a rolling up
 $payloadObject = @{ text = $textPayload }
 $jsonPayload = ConvertTo-Json $payloadObject -Compress
 
-# NEW: Save the payload out to a temporary local file using explicit UTF-8 encoding
+# NEW: Save the payload out to a temporary local file using explicit UTF-8 encoding without BOM
 $tempPayloadPath = Join-Path $env:TEMP "slack_payload.json"
-Out-File -FilePath $tempPayloadPath -InputObject $jsonPayload -Encoding utf8 -Force
 
-# NEW: Tell curl to read directly from the file path using the '@' prefix (bypasses CLI quote parsing)
-curl.exe -X POST -H "Content-type: application/json" --data "@$tempPayloadPath" $slackWebhookUrl
+[System.IO.File]::WriteAllText(
+    $tempPayloadPath,
+    $jsonPayload,
+    [System.Text.UTF8Encoding]::new($false)
+)
+
+# NEW: Tell curl to read directly from the file path using the '@' prefix
+curl.exe -X POST `
+  -H "Content-Type: application/json" `
+  --data-binary "@$tempPayloadPath" `
+  $slackWebhookUrl
 
 # Clean up the temporary payload file after execution
-if (Test-Path $tempPayloadPath) { Remove-Item $tempPayloadPath -Force }
+if (Test-Path $tempPayloadPath) {
+    Remove-Item $tempPayloadPath -Force
+}
 
 Write-Output ""
 Write-Output "SUCCESS: Local server is updated. Inspect the newly opened Helm terminal and refresh your Control Plane UI!"
