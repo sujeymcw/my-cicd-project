@@ -3,7 +3,7 @@ $buildTag = "local-" + (Get-Date -Format "yyyyMMdd-HHmmss")
 
 # Prompt the user for a custom commit message right at launch
 Write-Output "--------------------------------------------------"
-$customMessage = Read-Host "💬 Enter your commit/deployment message"
+$customMessage = Read-Host "Enter your commit/deployment message"
 Write-Output "--------------------------------------------------"
 
 # Fallback to a default message if you just press Enter
@@ -25,7 +25,7 @@ docker build -f ./Dockerfile -t sujeymcw/expo-web-app:$buildTag . --quiet
 
 # 4. Fire the Helm upgrade configuration immediately and spawn a new terminal window for the outputs
 Write-Output "STAGE 3 OF 5: Launching independent terminal for Helm Chart status outputs..."
-helm upgrade --install expo-web-release ./charts/my-web-app --set image.repository="sujeymcw/expo-web-app" --set image.tag=$buildTag --set image.imagePullPolicy="IfNotPresent" --set service.type="LoadBalancer" --set service.port=80 --namespace default --silent
+helm upgrade --install expo-web-release ./charts/my-web-app --set image.repository="sujeymcw/expo-web-app" --set image.tag=$buildTag --set image.imagePullPolicy="IfNotPresent" --set service.type="LoadBalancer" --set service.port=80 --namespace default > $null
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "Clear-Host; helm status expo-web-release --namespace default"
 
 # 5. Force the active Kubernetes deployment configurations to swap the containers open instantly
@@ -35,7 +35,7 @@ kubectl rollout restart deployment/expo-web-deployment --namespace default
 # 6. Shoot the Automated Slack Telemetry Card to your Sandbox Channel
 Write-Output "STAGE 5 OF 5: Dispatching instant telemetry alert to Slack..."
 
-# NEW: Dynamically parse the secret webhook from your untracked local file
+# Dynamically parse the secret webhook from your untracked local file
 if (Test-Path "./local_settings.json") {
     $settings = Get-Content "./local_settings.json" | ConvertFrom-Json
     $slackWebhookUrl = $settings.SLACK_WEBHOOK_URL
@@ -44,54 +44,23 @@ if (Test-Path "./local_settings.json") {
     Exit
 }
 
-# Using a flat Here-String ensures the PowerShell parser never throws a syntax error on strings
-$jsonPayload = @"
-{
-  "attachments": [
-    {
-      "color": "#2EB886",
-      "pretext": "🚀 *Deployment Rollout Successful*",
-      "fallback": "Kubernetes Deployment Update Successful.",
-      "blocks": [
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": "The local Kubernetes cluster environment has successfully processed a rolling update layout step."
-          }
-        },
-        {
-          "type": "section",
-          "fields": [
-            { "type": "mrkdwn", "text": "*Operator:*\nSujey Hariprasad" },
-            { "type": "mrkdwn", "text": "*Build Tag:*\n$buildTag" },
-            { "type": "mrkdwn", "text": "*Environment:*\nLocal Cluster (default)" },
-            { "type": "mrkdwn", "text": "*Helm Release:*\nexpo-web-release" }
-          ]
-        },
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": "*Commit/Deployment Message:*\n_$customMessage_"
-          }
-        },
-        {
-          "type": "context",
-          "elements": [
-            {
-              "type": "mrkdwn",
-              "text": "🌐 *Access URL:* http://localhost  •  📅 *Time Sync:* $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-            }
-          ]
-        }
-      ]
-    }
-  ]
+# Building explicit payload arrays avoids any type flattening validation breaks
+$block1 = [ordered]@{ type = "section"; text = @{ type = "mrkdwn"; text = "The local Kubernetes cluster environment has successfully processed a rolling update layout step." } }
+$block2 = [ordered]@{ type = "section"; fields = @( @{ type = "mrkdwn"; text = "*Operator:*\nSujey Hariprasad" }, @{ type = "mrkdwn"; text = "*Build Tag:*\n$buildTag" }, @{ type = "mrkdwn"; text = "*Environment:*\nLocal Cluster (default)" }, @{ type = "mrkdwn"; text = "*Helm Release:*\nexpo-web-release" } ) }
+$block3 = [ordered]@{ type = "section"; text = @{ type = "mrkdwn"; text = "*Commit/Deployment Message:*\n_$customMessage_" } }
+$block4 = [ordered]@{ type = "context"; elements = @( @{ type = "mrkdwn"; text = "Access URL: http://localhost  •  Time Sync: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" } ) }
+
+$slackAttachment = [ordered]@{
+    color = "#2EB886"
+    pretext = "Deployment Rollout Successful"
+    fallback = "Kubernetes Deployment Update Successful."
+    blocks = @($block1, $block2, $block3, $block4)
 }
-"@
+
+$payloadObject = @{ attachments = @($slackAttachment) }
+$jsonPayload = ConvertTo-Json $payloadObject -Depth 10
 
 # Fire the webhook straight into your Slack workspace!
-$null = Invoke-RestMethod -Uri $slackWebhookUrl -Method Post -Body $jsonPayload -ContentType "application/json"
+$null = Invoke-RestMethod -Uri $slackWebhookUrl -Method Post -Body $jsonPayload -ContentType "application/json; charset=utf-8"
 
 Write-Output "SUCCESS: Local server is updated. Inspect the newly opened Helm terminal and refresh your Control Plane UI!"
