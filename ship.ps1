@@ -25,7 +25,8 @@ docker build -f ./Dockerfile -t sujeymcw/expo-web-app:$buildTag . --quiet
 
 # 4. Fire the Helm upgrade configuration immediately and spawn a new terminal window for the outputs
 Write-Output "STAGE 3 OF 5: Launching independent terminal for Helm Chart status outputs..."
-helm upgrade --install expo-web-release ./charts/my-web-app --set image.repository="sujeymcw/expo-web-app" --set image.tag=$buildTag --set image.imagePullPolicy="IfNotPresent" --set service.type="LoadBalancer" --set service.port=80 --namespace default --quiet
+# Corrected: Changed --quiet to --silent for Helm compatibility
+helm upgrade --install expo-web-release ./charts/my-web-app --set image.repository="sujeymcw/expo-web-app" --set image.tag=$buildTag --set image.imagePullPolicy="IfNotPresent" --set service.type="LoadBalancer" --set service.port=80 --namespace default --silent
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "Clear-Host; helm status expo-web-release --namespace default"
 
 # 5. Force the active Kubernetes deployment configurations to swap the containers open instantly
@@ -86,6 +87,7 @@ $jsonPayload = @"
 "@
 
 # Fire the webhook straight into your Slack workspace!
-Invoke-RestMethod -Uri $slackWebhookUrl -Method Post -Body $jsonPayload -ContentType "application/json" --quiet
+# Corrected: Removed invalid --quiet parameter string flag
+$null = Invoke-RestMethod -Uri $slackWebhookUrl -Method Post -Body $jsonPayload -ContentType "application/json"
 
 Write-Output "SUCCESS: Local server is updated. Inspect the newly opened Helm terminal and refresh your Control Plane UI!"
