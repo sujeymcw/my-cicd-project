@@ -36,11 +36,11 @@ kubectl rollout restart deployment/expo-web-deployment --namespace default
 Write-Output "STAGE 5 OF 5: Dispatching instant telemetry alert to Slack via curl..."
 
 # Dynamically parse the secret webhook from your untracked local file
-if (Test-Path "./local_settings.json") {
-    $settings = Get-Content "./local_settings.json" | ConvertFrom-Json
+if (Test-Path "./webhook.json") {
+    $settings = Get-Content "./webhook.json" | ConvertFrom-Json
     $slackWebhookUrl = $settings.SLACK_WEBHOOK_URL
 } else {
-    Write-Error "Missing local_settings.json file! Cannot dispatch Slack alert."
+    Write-Error "Missing webhook.json file! Cannot dispatch Slack alert."
     Exit
 }
 
