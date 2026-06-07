@@ -1,4 +1,11 @@
-# 1. Start the performance benchmark stopwatch
+# ============================================================
+# GitHub Push -> Docker Build -> Docker Push -> Helm Upgrade -> Kubernetes Deployment
+# Clean DevOps Pipeline Script
+# ============================================================
+
+$ErrorActionPreference = "Stop"
+
+# Start pipeline timer
 $pipelineStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $buildTag = "local-" + (Get-Date -Format "yyyyMMdd-HHmmss")
 
@@ -7,144 +14,113 @@ $customMessage = Read-Host "Enter your commit/deployment message"
 Write-Output "--------------------------------------------------"
 
 if ([string]::IsNullOrWhiteSpace($customMessage)) {
-    $customMessage = "ci: instant docker helm kubernetes rollout"
+    $customMessage = "ci: docker helm kubernetes rollout"
 }
 
+# Project configuration
 $dockerImage = "sujeymcw/expo-web-app"
 $helmRelease = "expo-web-release"
 $helmChartPath = "./charts/my-web-app"
 $namespace = "default"
-$helmReportFile = "./helm-deployment-report.txt"
-$renderedManifestFile = "./rendered-manifest.yaml"
 
-function Send-SlackMessage([string]$messageText) {
-    if (Test-Path "./webhook.json") {
-        $settings = Get-Content "./webhook.json" | ConvertFrom-Json
-        $slackWebhookUrl = $settings.SLACK_WEBHOOK_URL.Trim()
+# Single proper Helm output file
+$helmChartOutputFile = "./helm-chart-output.yaml"
 
-        $bodyObject = @{
-            text = $messageText
-        }
-
-        $jsonBody = $bodyObject | ConvertTo-Json -Compress
-
-        Invoke-RestMethod `
-            -Uri $slackWebhookUrl `
-            -Method Post `
-            -Body $jsonBody `
-            -ContentType "application/json; charset=utf-8"
-    }
-}
-
-function Clear-Port8000 {
-    Write-Output "PERFORMING HARD SCRUB ON PORT 8000..."
-
-    try {
-        $connections = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
-
-        if ($connections) {
-            $processIds = $connections | Select-Object -ExpandProperty OwningProcess -Unique
-
-            foreach ($processId in $processIds) {
-                if ($processId -and $processId -ne $PID) {
-                    Write-Host "Killing process using port 8000: PID $processId" -ForegroundColor Yellow
-                    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-                }
-            }
-        }
-
-        Start-Sleep -Seconds 2
-        Write-Host "Port 8000 cleanup completed." -ForegroundColor Green
-    } catch {
-        Write-Host "Socket release sweep finished..." -ForegroundColor Yellow
-    }
-}
-
-function Get-FreeExpoPort {
-    $preferredPorts = @(8081, 8082, 8083, 8084, 8085, 8090, 8091, 8092, 19000, 19001, 19002)
-
-    foreach ($expoPort in $preferredPorts) {
-        $portUsed = Get-NetTCPConnection -LocalPort $expoPort -ErrorAction SilentlyContinue
-        if (-not $portUsed) {
-            return $expoPort
-        }
-    }
-
-    return 8099
-}
-
-$expoPort = Get-FreeExpoPort
-
-function Send-SlackFailure([string]$stageName, [string]$errorDetails) {
-    $failPayload = "*=== KUBERNETES DEPLOYMENT CRITICAL FAILURE ===*" + "`n`n" +
-                   "*Broken Stage:* " + $stageName + "`n" +
-                   "*Error Context:* " + $errorDetails + "`n" +
-                   "--------------------------------------------------" + "`n" +
-                   "_Execution halted instantly to protect active cluster node stability._"
-
-    try {
-        Send-SlackMessage $failPayload
-    } catch {
-        Write-Host "Slack failure alert could not be sent: $_" -ForegroundColor Yellow
-    }
-
-    Write-Error "CRITICAL: Pipeline halted during execution at $stageName."
-
-    Write-Output "LAUNCHING EXPO MOBILE INTERFACE CONSOLE IN SEPARATE POWERSHELL..."
-    Start-Process powershell.exe -ArgumentList @(
-        "-NoExit",
-        "-Command",
-        "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO MOBILE FRONTEND INTERFACE ON PORT $expoPort...' -ForegroundColor Blue; npx expo start -w --port $expoPort --non-interactive"
+function Test-CommandExists {
+    param (
+        [string]$CommandName
     )
 
-    Exit
+    $command = Get-Command $CommandName -ErrorAction SilentlyContinue
+    return $null -ne $command
+}
+
+function Invoke-RequiredCommandCheck {
+    $requiredCommands = @("git", "docker", "kubectl", "helm")
+
+    foreach ($commandName in $requiredCommands) {
+        if (-not (Test-CommandExists $commandName)) {
+            Write-Error "$commandName is not installed or not available in PATH."
+            exit 1
+        }
+    }
 }
 
 function Ensure-MetricsServer {
-    Write-Host ""
-    Write-Host "PRE-FLIGHT: ENABLING KUBERNETES METRICS SERVER FIRST..." -ForegroundColor Cyan
+    Write-Output ""
+    Write-Output "PRE-FLIGHT: Checking Kubernetes Metrics Server..."
 
     kubectl top nodes *> $null
 
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "Metrics Server already active." -ForegroundColor Green
+        Write-Output "Metrics Server is already active."
         return
     }
 
-    Write-Host "Metrics Server not detected. Enabling automatically..." -ForegroundColor Yellow
-    minikube addons enable metrics-server
+    if (Test-CommandExists "minikube") {
+        Write-Output "Metrics Server not found. Minikube detected, enabling metrics-server addon..."
 
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Failed to enable metrics-server addon. Continuing deployment." -ForegroundColor Red
-        return
-    }
+        minikube addons enable metrics-server *> $null
 
-    Write-Host "Waiting for Metrics Server rollout..." -ForegroundColor Yellow
-    kubectl rollout status deployment/metrics-server -n kube-system --timeout=180s *> $null
-
-    for ($i = 1; $i -le 30; $i++) {
-        kubectl top nodes *> $null
-
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "Metrics Server successfully activated." -ForegroundColor Green
+        if ($LASTEXITCODE -ne 0) {
+            Write-Output "Metrics Server addon could not be enabled. Continuing deployment."
             return
         }
 
-        Write-Host "Waiting for Metrics API... ($i/30)" -ForegroundColor Yellow
-        Start-Sleep -Seconds 5
+        Write-Output "Waiting for Metrics Server rollout..."
+        kubectl rollout status deployment/metrics-server -n kube-system --timeout=180s *> $null
+
+        for ($i = 1; $i -le 20; $i++) {
+            kubectl top nodes *> $null
+
+            if ($LASTEXITCODE -eq 0) {
+                Write-Output "Metrics Server is active."
+                return
+            }
+
+            Start-Sleep -Seconds 5
+        }
+
+        Write-Output "Metrics Server was enabled, but metrics API is still warming up."
+        return
     }
 
-    Write-Host "Metrics Server enabled, but API is still warming up." -ForegroundColor Yellow
+    Write-Output "Minikube is not installed. Skipping Minikube metrics-server addon step."
+    Write-Output "Deployment will continue normally."
 }
 
-function Write-DevOpsHelmReport {
+function Write-HelmChartOutput {
     param (
         [string]$ImageName,
         [string]$ImageTag
     )
 
-    Write-Host ""
-    Write-Host "GENERATING REAL DEVOPS HELM REPORT..." -ForegroundColor Cyan
+    Write-Output ""
+    Write-Output "Generating single Helm chart output file..."
+
+@"
+# ============================================================
+# HELM CHART DEPLOYMENT OUTPUT
+# ============================================================
+# Generated At: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+# Workflow:
+#   Git Push
+#      ↓
+#   Build Image
+#      ↓
+#   Push Registry
+#      ↓
+#   Helm Upgrade
+#      ↓
+#   Kubernetes Deployment
+#
+# Docker Image : ${ImageName}:${ImageTag}
+# Helm Release : $helmRelease
+# Namespace    : $namespace
+# Chart Path   : $helmChartPath
+# ============================================================
+
+"@ | Set-Content $helmChartOutputFile -Encoding UTF8
 
     helm template $helmRelease $helmChartPath `
         --set image.repository="$ImageName" `
@@ -152,231 +128,80 @@ function Write-DevOpsHelmReport {
         --set image.imagePullPolicy="IfNotPresent" `
         --set service.type="LoadBalancer" `
         --set service.port=80 `
-        --namespace $namespace > $renderedManifestFile
-
-@"
-============================================================
-REAL DEVOPS HELM DEPLOYMENT REPORT
-============================================================
-
-Generated At       : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-Namespace          : $namespace
-Helm Release       : $helmRelease
-Helm Chart Path    : $helmChartPath
-Docker Image       : ${ImageName}:${ImageTag}
-Rendered Manifest  : $renderedManifestFile
-
-============================================================
-WORKFLOW
-============================================================
-
-Git Push
-   ↓
-Build Image
-   ↓
-Push Registry
-   ↓
-Helm Upgrade
-   ↓
-Kubernetes Deployment
-
-============================================================
-HELM LIST
-============================================================
-
-"@ | Set-Content $helmReportFile -Encoding UTF8
-
-    helm list --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
+        --namespace $namespace | Out-File $helmChartOutputFile -Append -Encoding UTF8
 
 @"
 
-============================================================
-HELM STATUS
-============================================================
+# ============================================================
+# HELM RELEASE STATUS
+# ============================================================
 
-"@ | Out-File $helmReportFile -Append -Encoding UTF8
+"@ | Out-File $helmChartOutputFile -Append -Encoding UTF8
 
-    helm status $helmRelease --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
-
-@"
-
-============================================================
-HELM VALUES
-============================================================
-
-"@ | Out-File $helmReportFile -Append -Encoding UTF8
-
-    helm get values $helmRelease --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
+    helm status $helmRelease --namespace $namespace | Out-File $helmChartOutputFile -Append -Encoding UTF8
 
 @"
 
-============================================================
-HELM MANIFEST
-============================================================
+# ============================================================
+# KUBERNETES DEPLOYMENT STATUS
+# ============================================================
 
-"@ | Out-File $helmReportFile -Append -Encoding UTF8
+"@ | Out-File $helmChartOutputFile -Append -Encoding UTF8
 
-    helm get manifest $helmRelease --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
-
-@"
-
-============================================================
-HELM ALL
-============================================================
-
-"@ | Out-File $helmReportFile -Append -Encoding UTF8
-
-    helm get all $helmRelease --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
+    kubectl get deployment --namespace $namespace -o wide | Out-File $helmChartOutputFile -Append -Encoding UTF8
 
 @"
 
-============================================================
-KUBERNETES DEPLOYMENT
-============================================================
+# ============================================================
+# KUBERNETES POD STATUS
+# ============================================================
 
-"@ | Out-File $helmReportFile -Append -Encoding UTF8
+"@ | Out-File $helmChartOutputFile -Append -Encoding UTF8
 
-    kubectl get deployment expo-web-deployment --namespace $namespace -o wide | Out-File $helmReportFile -Append -Encoding UTF8
-
-@"
-
-============================================================
-KUBERNETES PODS
-============================================================
-
-"@ | Out-File $helmReportFile -Append -Encoding UTF8
-
-    kubectl get pods --namespace $namespace -o wide | Out-File $helmReportFile -Append -Encoding UTF8
+    kubectl get pods --namespace $namespace -o wide | Out-File $helmChartOutputFile -Append -Encoding UTF8
 
 @"
 
-============================================================
-KUBERNETES SERVICES
-============================================================
+# ============================================================
+# KUBERNETES SERVICE STATUS
+# ============================================================
 
-"@ | Out-File $helmReportFile -Append -Encoding UTF8
+"@ | Out-File $helmChartOutputFile -Append -Encoding UTF8
 
-    kubectl get svc --namespace $namespace -o wide | Out-File $helmReportFile -Append -Encoding UTF8
-
-@"
-
-============================================================
-KUBERNETES ROLLOUT STATUS
-============================================================
-
-"@ | Out-File $helmReportFile -Append -Encoding UTF8
-
-    kubectl rollout status deployment/expo-web-deployment --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
+    kubectl get svc --namespace $namespace -o wide | Out-File $helmChartOutputFile -Append -Encoding UTF8
 
 @"
 
-============================================================
-POD CPU AND MEMORY METRICS
-============================================================
+# ============================================================
+# RESOURCE METRICS
+# ============================================================
 
-"@ | Out-File $helmReportFile -Append -Encoding UTF8
+"@ | Out-File $helmChartOutputFile -Append -Encoding UTF8
 
-    kubectl top pods --namespace $namespace | Out-File $helmReportFile -Append -Encoding UTF8
-
-@"
-
-============================================================
-NODE CPU AND MEMORY METRICS
-============================================================
-
-"@ | Out-File $helmReportFile -Append -Encoding UTF8
-
-    kubectl top nodes | Out-File $helmReportFile -Append -Encoding UTF8
-
-    Write-Host "DevOps Helm report generated successfully:" -ForegroundColor Green
-    Write-Host $helmReportFile -ForegroundColor Cyan
-
-    Write-Host "Rendered Kubernetes manifest generated:" -ForegroundColor Green
-    Write-Host $renderedManifestFile -ForegroundColor Cyan
-}
-
-function Show-DevOpsHelmOutput {
-    param (
-        [string]$ImageName,
-        [string]$ImageTag
-    )
-
-    Write-Host ""
-    Write-Host "============================================================" -ForegroundColor Cyan
-    Write-Host "REAL DEVOPS HELM CHART DEPLOYMENT OUTPUT" -ForegroundColor Cyan
-    Write-Host "============================================================" -ForegroundColor Cyan
-    Write-Host "Docker Image       : ${ImageName}:${ImageTag}" -ForegroundColor Green
-    Write-Host "Helm Release       : $helmRelease" -ForegroundColor Green
-    Write-Host "Namespace          : $namespace" -ForegroundColor Green
-    Write-Host "Helm Report File   : $helmReportFile" -ForegroundColor Green
-    Write-Host "Rendered Manifest  : $renderedManifestFile" -ForegroundColor Green
-    Write-Host "============================================================" -ForegroundColor Cyan
-
-    Write-Host ""
-    Write-Host "HELM LIST:" -ForegroundColor Yellow
-    helm list --namespace $namespace
-
-    Write-Host ""
-    Write-Host "HELM STATUS:" -ForegroundColor Yellow
-    helm status $helmRelease --namespace $namespace
-
-    Write-Host ""
-    Write-Host "HELM VALUES:" -ForegroundColor Yellow
-    helm get values $helmRelease --namespace $namespace
-
-    Write-Host ""
-    Write-Host "KUBERNETES DEPLOYMENT:" -ForegroundColor Yellow
-    kubectl get deployment expo-web-deployment --namespace $namespace -o wide
-
-    Write-Host ""
-    Write-Host "KUBERNETES PODS:" -ForegroundColor Yellow
-    kubectl get pods --namespace $namespace -o wide
-
-    Write-Host ""
-    Write-Host "KUBERNETES SERVICES:" -ForegroundColor Yellow
-    kubectl get svc --namespace $namespace -o wide
-
-    Write-Host ""
-    Write-Host "KUBERNETES ROLLOUT STATUS:" -ForegroundColor Yellow
-    kubectl rollout status deployment/expo-web-deployment --namespace $namespace
-
-    Write-Host ""
-    Write-Host "POD CPU AND MEMORY METRICS:" -ForegroundColor Yellow
-    kubectl top pods --namespace $namespace
+    kubectl top pods --namespace $namespace 2>$null | Out-File $helmChartOutputFile -Append -Encoding UTF8
 
     if ($LASTEXITCODE -ne 0) {
-        Write-Host ""
-        Write-Host "Metrics still warming up. Showing deployment resource requests and limits:" -ForegroundColor Yellow
-        kubectl describe deployment expo-web-deployment --namespace $namespace | Select-String "Limits|Requests|cpu|memory"
+@"
+Metrics API is not available.
+This does not stop the deployment.
+Install or enable metrics-server to view CPU and memory usage.
+
+"@ | Out-File $helmChartOutputFile -Append -Encoding UTF8
     }
 
-    Write-Host ""
-    Write-Host "NODE CPU AND MEMORY METRICS:" -ForegroundColor Yellow
-    kubectl top nodes
-
-    Write-Host ""
-    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Output "Helm chart output created: $helmChartOutputFile"
 }
 
-Write-Output "PERFORMING HARD SCRUB ON PORT 8000 AND LAUNCHING BACKEND..."
-Clear-Port8000
+# ============================================================
+# Pipeline execution
+# ============================================================
 
-Start-Process powershell.exe -ArgumentList @(
-    "-NoExit",
-    "-Command",
-    "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'LAUNCHING CONTROL PLANE BACKEND BRIDGE ENGINE...' -ForegroundColor Cyan; python dashboard_backend.py"
-)
-
-Write-Output "Waiting 5 seconds for backend API server to bind cleanly to port 8000..."
-Start-Sleep -Seconds 5
+Invoke-RequiredCommandCheck
 
 Write-Output ""
-Write-Output "STARTING INSTANT GITOPS PIPELINE ROLLOUT..."
-Write-Output "PRE-FLIGHT: Metrics Server will be enabled before final output."
-Ensure-MetricsServer
-
+Write-Output "STARTING DEVOPS CICD PIPELINE..."
 Write-Output ""
-Write-Output "WORKFLOW:"
+Write-Output "Workflow:"
 Write-Output "Git Push"
 Write-Output "   ↓"
 Write-Output "Build Image"
@@ -388,66 +213,62 @@ Write-Output "   ↓"
 Write-Output "Kubernetes Deployment"
 Write-Output ""
 
-Write-Output "STAGE 1 OF 5: Syncing source files with Git Repository..."
+Ensure-MetricsServer
+
+Write-Output ""
+Write-Output "STAGE 1: Pushing code to GitHub..."
+
 git add .
 
 git diff --cached --quiet
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "No new source changes detected. Skipping git commit..." -ForegroundColor Yellow
+    Write-Output "No new changes found. Skipping git commit."
 } else {
-    git commit -m "$customMessage" --quiet
+    git commit -m "$customMessage"
 
     if ($LASTEXITCODE -ne 0) {
-        Send-SlackFailure "STAGE 1 (Git Commit)" "Git commit failed."
+        Write-Error "Git commit failed."
+        exit 1
     }
 }
 
-git push origin main --quiet
+git push origin main
 
 if ($LASTEXITCODE -ne 0) {
-    Send-SlackFailure "STAGE 1 (Git Push)" "Repository push rejected or upstream remote server unavailable."
+    Write-Error "Git push failed."
+    exit 1
 }
 
-Write-Output "STAGE 2 OF 5: Building Docker image immediately with cache acceleration..."
-
-try {
-    $disruptCheck = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/metrics" -Method Get -TimeoutSec 2
-
-    if ($disruptCheck.chaosSimulationActive -eq $true -or $disruptCheck.disrupted -eq $true) {
-        Write-Host ""
-        Write-Host "!!! CHAOS INTERACTION DETECTED: Simulating Broken Docker Compilation !!!" -ForegroundColor Red
-        Send-SlackFailure "STAGE 2 (Docker Build)" "Compilation failed inside the Dockerfile environment layers due to an armed infrastructure disruption."
-    }
-} catch {
-    Write-Host "Metrics API bridge offline, proceeding with standard Docker verification loop..." -ForegroundColor Yellow
-}
+Write-Output ""
+Write-Output "STAGE 2: Building Docker image..."
 
 docker build `
     -f ./Dockerfile `
     -t "${dockerImage}:$buildTag" `
     --pull=false `
-    --quiet `
     .
 
 if ($LASTEXITCODE -ne 0) {
-    Send-SlackFailure "STAGE 2 (Docker Build)" "Docker image build failed."
+    Write-Error "Docker image build failed."
+    exit 1
 }
 
-Write-Host "Docker Image Generated Successfully: ${dockerImage}:$buildTag" -ForegroundColor Green
+Write-Output "Docker image created: ${dockerImage}:$buildTag"
 
-Write-Output "STAGE 3 OF 5: Pushing Docker image to registry..."
+Write-Output ""
+Write-Output "STAGE 3: Pushing Docker image to registry..."
+
 docker push "${dockerImage}:$buildTag"
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Docker registry push failed. Loading image into Minikube as fallback..." -ForegroundColor Yellow
-    minikube image load "${dockerImage}:$buildTag"
-
-    if ($LASTEXITCODE -ne 0) {
-        Send-SlackFailure "STAGE 3 (Docker Push / Minikube Load)" "Image push failed and Minikube fallback load also failed."
-    }
+    Write-Error "Docker image push failed. Please check Docker login and repository access."
+    exit 1
 }
 
-Write-Output "STAGE 4 OF 5: Running Helm Upgrade and Kubernetes deployment..."
+Write-Output "Docker image pushed: ${dockerImage}:$buildTag"
+
+Write-Output ""
+Write-Output "STAGE 4: Deploying to Kubernetes using Helm..."
 
 helm upgrade --install $helmRelease $helmChartPath `
     --set image.repository="$dockerImage" `
@@ -459,92 +280,34 @@ helm upgrade --install $helmRelease $helmChartPath `
     --create-namespace
 
 if ($LASTEXITCODE -ne 0) {
-    Send-SlackFailure "STAGE 4 (Helm Upgrade)" "Helm manifest configuration parsing rejected by the target cluster."
+    Write-Error "Helm upgrade failed."
+    exit 1
 }
 
-kubectl rollout restart deployment/expo-web-deployment --namespace $namespace
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Rollout restart skipped. Helm upgrade may have already triggered a pod update." -ForegroundColor Yellow
-}
+Write-Output ""
+Write-Output "Waiting for Kubernetes deployment rollout..."
 
 kubectl rollout status deployment/expo-web-deployment --namespace $namespace --timeout=180s
 
 if ($LASTEXITCODE -ne 0) {
-    Send-SlackFailure "STAGE 4 (Kubernetes Rollout)" "Deployment did not become ready within timeout."
-}
-
-Write-Output "STAGE 5 OF 5: Showing real DevOps Helm chart output..."
-
-Write-DevOpsHelmReport -ImageName $dockerImage -ImageTag $buildTag
-Show-DevOpsHelmOutput -ImageName $dockerImage -ImageTag $buildTag
-
-Start-Process powershell.exe -ArgumentList @(
-    "-NoExit",
-    "-Command",
-    "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'REAL DEVOPS HELM DEPLOYMENT OUTPUT' -ForegroundColor Cyan; Write-Host ''; Write-Host 'HELM LIST:' -ForegroundColor Yellow; helm list --namespace $namespace; Write-Host ''; Write-Host 'HELM STATUS:' -ForegroundColor Yellow; helm status $helmRelease --namespace $namespace; Write-Host ''; Write-Host 'HELM VALUES:' -ForegroundColor Yellow; helm get values $helmRelease --namespace $namespace; Write-Host ''; Write-Host 'KUBERNETES PODS:' -ForegroundColor Yellow; kubectl get pods --namespace $namespace -o wide; Write-Host ''; Write-Host 'KUBERNETES SERVICES:' -ForegroundColor Yellow; kubectl get svc --namespace $namespace -o wide; Write-Host ''; Write-Host 'POD CPU AND MEMORY METRICS:' -ForegroundColor Yellow; kubectl top pods --namespace $namespace; Write-Host ''; Write-Host 'NODE CPU AND MEMORY METRICS:' -ForegroundColor Yellow; kubectl top nodes; Write-Host ''; Write-Host 'FULL HELM REPORT FILE:' -ForegroundColor Green; Write-Host '$helmReportFile'; Write-Host ''; Write-Host 'RENDERED MANIFEST FILE:' -ForegroundColor Green; Write-Host '$renderedManifestFile'"
-)
-
-Write-Output "RUNNING OPERATIONAL ENVIRONMENT HEALTH CHECK..."
-Start-Sleep -Seconds 3
-
-$portCheck = Test-NetConnection -ComputerName "localhost" -Port 80 -WarningAction SilentlyContinue
-
-if ($portCheck.TcpTestSucceeded) {
-    $healthStatus = "PASSED (Port 80 responding cleanly)"
-} else {
-    $healthStatus = "WARNING (Port 80 not responding yet)"
-}
-
-$runningPods = kubectl get pods --namespace $namespace --no-headers 2>$null | Select-String "Running"
-$podCount = @($runningPods).Count
-
-$pipelineStopwatch.Stop()
-$executionDuration = [math]::Round($pipelineStopwatch.Elapsed.TotalSeconds, 2)
-$timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-
-Write-Output "DISPATCHING INSTANT TELEMETRY ALERT TO SLACK..."
-
-$textPayload = "*=== KUBERNETES DEPLOYMENT ROLLOUT SUCCESSFUL ===*" + "`n`n" +
-               "*Deployment Status:* Active & Rolling" + "`n" +
-               "*Docker Image Generated:* " + "${dockerImage}:$buildTag" + "`n" +
-               "*Cluster Health Check:* " + $healthStatus + "`n" +
-               "*Running Pods:* " + $podCount + "`n" +
-               "*Helm Report File:* " + $helmReportFile + "`n" +
-               "*Rendered Manifest File:* " + $renderedManifestFile + "`n" +
-               "*Memory/CPU Usage:* Check DevOps Helm terminal" + "`n" +
-               "*Total Processing Velocity:* " + $executionDuration + " seconds" + "`n" +
-               "*Local Endpoint URL:* http://localhost" + "`n" +
-               "*Expo Frontend Port:* " + $expoPort + "`n`n" +
-               "--------------------------------------------------" + "`n" +
-               "*PIPELINE METRICS LOGS*" + "`n" +
-               "> *Operator:* Sujey Hariprasad" + "`n" +
-               "> *Cluster Environment:* Local Desktop Node (default)" + "`n" +
-               "> *Helm Chart Release:* " + $helmRelease + "`n" +
-               "> *Unique Build Tag:* " + $buildTag + "`n" +
-               "> *Git Sync Message:* " + $customMessage + "`n" +
-               "--------------------------------------------------" + "`n`n" +
-               "_Telemetry Sync Complete: " + $timestamp + "_"
-
-try {
-    Send-SlackMessage $textPayload
-} catch {
-    Write-Error "Slack API failed: $_"
+    Write-Error "Kubernetes deployment rollout failed."
+    exit 1
 }
 
 Write-Output ""
-Write-Output "SUCCESS: Git push completed, Docker image created, registry/minikube image updated, Helm upgraded, and Kubernetes deployed."
-Write-Output "Docker Image Generated: ${dockerImage}:$buildTag"
-Write-Output "Running Pods: $podCount"
-Write-Output "Full Helm Report: $helmReportFile"
-Write-Output "Rendered Manifest: $renderedManifestFile"
-Write-Output "Total pipeline execution velocity: $executionDuration seconds."
+Write-Output "STAGE 5: Creating one proper Helm chart output..."
+
+Write-HelmChartOutput -ImageName $dockerImage -ImageTag $buildTag
+
+$pipelineStopwatch.Stop()
+$executionDuration = [math]::Round($pipelineStopwatch.Elapsed.TotalSeconds, 2)
+
+Write-Output ""
 Write-Output "--------------------------------------------------"
-
-Write-Output "LAUNCHING EXPO MOBILE INTERFACE CONSOLE IN SEPARATE POWERSHELL..."
-
-Start-Process powershell.exe -ArgumentList @(
-    "-NoExit",
-    "-Command",
-    "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING FRONTEND INTERFACE ON PORT $expoPort...' -ForegroundColor Blue; npx expo start -w --port $expoPort --non-interactive"
-)
+Write-Output "SUCCESS: CICD pipeline completed."
+Write-Output "Docker Image: ${dockerImage}:$buildTag"
+Write-Output "Helm Release: $helmRelease"
+Write-Output "Namespace: $namespace"
+Write-Output "Single Helm Output File: $helmChartOutputFile"
+Write-Output "Total Time: $executionDuration seconds"
+Write-Output "--------------------------------------------------"
