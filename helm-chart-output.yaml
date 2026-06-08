@@ -1,9 +1,9 @@
 ﻿# ============================================================
 # HELM CHART DEPLOYMENT OUTPUT
 # ============================================================
-# Generated At : 2026-06-08 12:07:00
+# Generated At : 2026-06-08 14:12:14
 # Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
-# Docker Image : sujeymcw/expo-web-app:local-20260608-120430
+# Docker Image : sujeymcw/expo-web-app:local-20260608-141043
 # Helm Release : expo-web-release
 # Namespace    : default
 # Chart Path   : ./charts/my-web-app
@@ -47,7 +47,7 @@ spec:
     spec:
       containers:
         - name: expo-web-container
-          image: "sujeymcw/expo-web-app:local-20260608-120430"
+          image: "sujeymcw/expo-web-app:local-20260608-141043"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -57,29 +57,30 @@ spec:
 # ============================================================
 
 NAME: expo-web-release
-LAST DEPLOYED: Mon Jun  8 12:06:52 2026
+LAST DEPLOYED: Mon Jun  8 14:12:08 2026
 NAMESPACE: default
 STATUS: deployed
-REVISION: 8
+REVISION: 9
 DESCRIPTION: Upgrade complete
 RESOURCES:
-==> v1/Service
-NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
-expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   17h
-
 ==> v1/Deployment
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
-expo-web-deployment   1/1     1            1           17h
+expo-web-deployment   1/1     1            1           19h
 
 ==> v1/Pod(related)
-NAME                                   READY   STATUS    RESTARTS   AGE
-expo-web-deployment-6d644c5dc6-7ts5b   1/1     Running   0          8s
+NAME                                   READY   STATUS      RESTARTS   AGE
+expo-web-deployment-696548cbf7-l7hk7   1/1     Running     0          6s
+expo-web-deployment-6d644c5dc6-7ts5b   0/1     Completed   0          125m
+
+==> v1/Service
+NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
+expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   19h
 
 
 TEST SUITE: None
 NOTES:
 ======================================================================
-Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #8)
+Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #9)
 ======================================================================
 
 STATUS:       Successfully deployed to namespace "default"
@@ -90,7 +91,7 @@ UPDATED AT:
 
 ≡ƒÉ│  ACTIVE CONTAINER MANIFEST:
     Registry: sujeymcw/expo-web-app
-    Image Tag: local-20260608-120430
+    Image Tag: local-20260608-141043
     Pull Policy: IfNotPresent
 
 ≡ƒôè  REAL-TIME DIAGNOSTIC COMMANDS:
@@ -108,7 +109,7 @@ USER-SUPPLIED VALUES:
 image:
   imagePullPolicy: IfNotPresent
   repository: sujeymcw/expo-web-app
-  tag: local-20260608-120430
+  tag: local-20260608-141043
 service:
   port: 80
   type: LoadBalancer
@@ -118,22 +119,23 @@ service:
 # ============================================================
 
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS           IMAGES                                        SELECTOR
-expo-web-deployment   1/1     1            1           17h   expo-web-container   sujeymcw/expo-web-app:local-20260608-120430   app=expo-web-app
+expo-web-deployment   1/1     1            1           19h   expo-web-container   sujeymcw/expo-web-app:local-20260608-141043   app=expo-web-app
 
 # ============================================================
 # KUBERNETES POD STATUS
 # ============================================================
 
-NAME                                   READY   STATUS    RESTARTS   AGE   IP            NODE       NOMINATED NODE   READINESS GATES
-expo-web-deployment-6d644c5dc6-7ts5b   1/1     Running   0          10s   10.244.0.12   minikube   <none>           <none>
+NAME                                   READY   STATUS      RESTARTS   AGE    IP            NODE       NOMINATED NODE   READINESS GATES
+expo-web-deployment-696548cbf7-l7hk7   1/1     Running     0          7s     10.244.0.13   minikube   <none>           <none>
+expo-web-deployment-6d644c5dc6-7ts5b   0/1     Completed   0          125m   10.244.0.12   minikube   <none>           <none>
 
 # ============================================================
 # KUBERNETES SERVICE STATUS
 # ============================================================
 
 NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE   SELECTOR
-expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   17h   app=expo-web-app
-kubernetes         ClusterIP      10.96.0.1        <none>        443/TCP        17h   <none>
+expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   19h   app=expo-web-app
+kubernetes         ClusterIP      10.96.0.1        <none>        443/TCP        19h   <none>
 
 # ============================================================
 # POD CPU AND MEMORY METRICS
@@ -152,7 +154,7 @@ At line:1 char:1
 # ============================================================
 
 NAME       CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
-minikube   391m         2%       727Mi           10%         
+minikube   175m         1%       734Mi           10%         
 
 # ============================================================
 # METRICS STATUS
