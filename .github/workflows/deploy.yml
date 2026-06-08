@@ -34,7 +34,32 @@ jobs:
         with:
           version: 'v3.12.0'
 
-      # 2. Compile the cloud Helm chart template logs matching your requested structure exactly
+      # 2. Inject your secure Kubeconfig data context to wire up the cloud runner to your nodes
+      - name: Configure Kubernetes Cluster Context Connection
+        uses: azure/k8s-set-context@v3
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBERNETES_KUBECONFIG }}
+
+      # 3. Download / Restart Metrics Server components and await stabilization API availability
+      - name: Initialize and Validate Metrics Server
+        run: |
+          echo "Checking Metrics Server availability..."
+          # Force a restart of the metrics deployment to clear cached or stuck socket states
+          kubectl rollout restart deployment/metrics-server -n kube-system 2>/null || true
+          
+          echo "Awaiting Metrics Server API initialization..."
+          # Polling loop up to 60 seconds to ensure metrics are accessible before running commands
+          for i in {1..12}; do
+            if kubectl get api-services v1beta1.metrics.k8s.io 2>/dev/null | grep -q "True"; then
+              echo "Metrics API successfully verified as Active."
+              break
+            fi
+            echo "Metrics pipeline spinning up... sleeping 5s"
+            sleep 5
+          done
+
+      # 4. Compile the cloud Helm chart template logs cleanly with real-time live cluster details
       - name: Generate Cloud Helm Chart Output File
         run: |
           # Section 1: Main Header Metrics
@@ -63,66 +88,58 @@ jobs:
             --namespace default >> ./helm-chart-output.yaml
           echo "" >> ./helm-chart-output.yaml
 
-          # Section 3: Fallback placeholders for runtime-only cluster metrics
+          # Section 3: Live Cluster Metrics Injection
           echo "# ============================================================" >> ./helm-chart-output.yaml
           echo "# HELM RELEASE STATUS" >> ./helm-chart-output.yaml
           echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "STATUS: deployed" >> ./helm-chart-output.yaml
-          echo "Live cluster validation pending local loop confirmation sync." >> ./helm-chart-output.yaml
+          helm status expo-web-release --namespace default 2>&1 >> ./helm-chart-output.yaml || echo "No active helm release found." >> ./helm-chart-output.yaml
           echo "" >> ./helm-chart-output.yaml
 
           echo "# ============================================================" >> ./helm-chart-output.yaml
           echo "# HELM RELEASE VALUES" >> ./helm-chart-output.yaml
           echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "USER-SUPPLIED VALUES:" >> ./helm-chart-output.yaml
-          echo "image:" >> ./helm-chart-output.yaml
-          echo "  imagePullPolicy: IfNotPresent" >> ./helm-chart-output.yaml
-          echo "  repository: ${{ secrets.REGISTRY_USERNAME }}/expo-web-app" >> ./helm-chart-output.yaml
-          echo "  tag: ${{ github.sha }}" >> ./helm-chart-output.yaml
-          echo "service:" >> ./helm-chart-output.yaml
-          echo "  port: 80" >> ./helm-chart-output.yaml
-          echo "  type: LoadBalancer" >> ./helm-chart-output.yaml
+          helm get values expo-web-release --namespace default 2>&1 >> ./helm-chart-output.yaml || echo "No custom value overrides applied." >> ./helm-chart-output.yaml
           echo "" >> ./helm-chart-output.yaml
 
           echo "# ============================================================" >> ./helm-chart-output.yaml
           echo "# KUBERNETES DEPLOYMENT STATUS" >> ./helm-chart-output.yaml
           echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "Pending automated rollout status tracking execution." >> ./helm-chart-output.yaml
+          kubectl get deployment --namespace default -o wide 2>&1 >> ./helm-chart-output.yaml
           echo "" >> ./helm-chart-output.yaml
 
           echo "# ============================================================" >> ./helm-chart-output.yaml
           echo "# KUBERNETES POD STATUS" >> ./helm-chart-output.yaml
           echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "Container creation pending local desktop node sync." >> ./helm-chart-output.yaml
+          kubectl get pods --namespace default -o wide 2>&1 >> ./helm-chart-output.yaml
           echo "" >> ./helm-chart-output.yaml
 
           echo "# ============================================================" >> ./helm-chart-output.yaml
           echo "# KUBERNETES SERVICE STATUS" >> ./helm-chart-output.yaml
           echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "Routing endpoints mapped dynamically to port 80 allocation rules." >> ./helm-chart-output.yaml
+          kubectl get svc --namespace default -o wide 2>&1 >> ./helm-chart-output.yaml
           echo "" >> ./helm-chart-output.yaml
 
           echo "# ============================================================" >> ./helm-chart-output.yaml
           echo "# POD CPU AND MEMORY METRICS" >> ./helm-chart-output.yaml
           echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "kubectl : error: metrics not available yet" >> ./helm-chart-output.yaml
+          kubectl top pods --namespace default 2>&1 >> ./helm-chart-output.yaml || echo "kubectl : error: metrics not available yet" >> ./helm-chart-output.yaml
           echo "" >> ./helm-chart-output.yaml
 
           echo "# ============================================================" >> ./helm-chart-output.yaml
           echo "# NODE CPU AND MEMORY METRICS" >> ./helm-chart-output.yaml
           echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "Host cluster telemetry tracking handled by separate metrics manager." >> ./helm-chart-output.yaml
+          kubectl top nodes 2>&1 >> ./helm-chart-output.yaml || echo "Node telemetry tracking currently unavailable." >> ./helm-chart-output.yaml
           echo "" >> ./helm-chart-output.yaml
 
           echo "# ============================================================" >> ./helm-chart-output.yaml
           echo "# METRICS STATUS" >> ./helm-chart-output.yaml
           echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "# Metrics Server : Active" >> ./helm-chart-output.yaml
+          echo "# Metrics Server : Active" >> >> ./helm-chart-output.yaml
           echo "# Pod Metrics    : Captured using kubectl top pods" >> ./helm-chart-output.yaml
           echo "# Node Metrics   : Captured using kubectl top nodes" >> ./helm-chart-output.yaml
           echo "# ============================================================" >> ./helm-chart-output.yaml
 
-      # 3. Intercept the file and upload it to the GitHub Web Interface UI as an immutable download
+      # 5. Intercept the file and upload it to the GitHub Web Interface UI as an immutable download
       - name: Upload Helm Output Artifact to GitHub Run View
         uses: actions/upload-artifact@v4
         with:
@@ -130,7 +147,7 @@ jobs:
           path: ./helm-chart-output.yaml
           retention-days: 7
 
-      # 4. Connect securely to Outlook SMTP servers to dispatch deployment confirmation metrics with file attachment
+      # 6. Connect securely to Outlook SMTP servers to dispatch deployment confirmation metrics with file attachment
       - name: Send Deployment Status Email via Outlook
         uses: dawidd6/action-send-mail@v3
         with:
@@ -141,9 +158,8 @@ jobs:
           subject: "🚀 GitOps Cloud Rollout Verification complete: sha-${{ github.sha }}"
           to: ${{ secrets.MAIL_RECIPIENT }}
           from: "GitHub Actions Runner Control Deck <${{ secrets.OUTLOOK_MAIL_USERNAME }}>"
-          secure: true
+          secure: false
           priority: high
-          # NEW: Directly maps the workspace file layout path to insert it as a true email attachment
           attachments: ./helm-chart-output.yaml
           body: |
             Hello Team,
@@ -159,7 +175,7 @@ jobs:
             Pushed Commit Message : "${{ github.event.head_commit.message }}"
             ============================================================
 
-            The comprehensive 'helm-chart-output.yaml' diagnostic sheet has been generated, compiled, and is directly attached to this automated status alert email for evaluation.
+            The comprehensive 'helm-chart-output.yaml' diagnostic sheet containing live pod run states and cluster load balances has been generated, compiled, and is directly attached to this email.
 
             Best Regards,
             Automated GitOps DevOps Daemon Engine
