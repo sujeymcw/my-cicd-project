@@ -1,11 +1,10 @@
 # ============================================================
 # Git Push -> Docker Build -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
-# Full DevOps CICD Script with Backend + Expo Auto Launch + Clean Helm Output
+# Full DevOps CICD Script with Backend + Expo Auto Launch + Clean Helm Output + Outlook Mail
 # ============================================================
 
 $ErrorActionPreference = "Stop"
 
-# 1. Start the performance benchmark stopwatch
 $pipelineStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $buildTag = "local-" + (Get-Date -Format "yyyyMMdd-HHmmss")
 
@@ -23,13 +22,15 @@ $helmRelease = "expo-web-release"
 $helmChartPath = "./charts/my-web-app"
 $namespace = "default"
 
-# Single proper Helm output file
+# Output file
 $helmChartOutputFile = "./helm-chart-output.yaml"
 
+# Outlook mail configuration
+$outlookTo = "sujey.hariprasad@multicorewareinc.com"
+$outlookSubject = "CICD Deployment Successful - $helmRelease - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+
 function Test-CommandExists {
-    param (
-        [string]$CommandName
-    )
+    param ([string]$CommandName)
 
     $command = Get-Command $CommandName -ErrorAction SilentlyContinue
     return $null -ne $command
@@ -75,19 +76,129 @@ function Invoke-RequiredCommandCheck {
     }
 }
 
-function Send-SlackMessage {
+function Send-OutlookDeploymentMail {
     param (
-        [string]$messageText
+        [string]$To,
+        [string]$Subject,
+        [string]$DockerImage,
+        [string]$ImageTag,
+        [string]$HelmRelease,
+        [string]$Namespace,
+        [string]$ChartPath,
+        [string]$AttachmentPath,
+        [string]$DeploymentStatus,
+        [string]$PodCount,
+        [string]$ExpoPort,
+        [string]$ExecutionDuration
     )
+
+    try {
+        if (-not (Test-Path $AttachmentPath)) {
+            Write-Host "Outlook mail skipped. Attachment not found: $AttachmentPath" -ForegroundColor Yellow
+            return
+        }
+
+        $resolvedAttachment = (Resolve-Path $AttachmentPath).Path
+        $generatedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+
+        $outlook = New-Object -ComObject Outlook.Application
+        $mail = $outlook.CreateItem(0)
+
+        $mail.To = $To
+        $mail.Subject = $Subject
+
+        $mail.HTMLBody = @"
+<html>
+<body style="font-family:Segoe UI, Arial, sans-serif; font-size:14px; color:#222;">
+
+<h2 style="color:#107C10;">CICD Deployment Successful</h2>
+
+<p>Hello,</p>
+
+<p>
+The automated CICD deployment pipeline has completed successfully.
+Please find the attached Helm deployment output report for review.
+</p>
+
+<h3>Deployment Summary</h3>
+
+<table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse;">
+<tr>
+<td><b>Status</b></td>
+<td style="color:#107C10;"><b>$DeploymentStatus</b></td>
+</tr>
+<tr>
+<td><b>Docker Image</b></td>
+<td>$DockerImage`:$ImageTag</td>
+</tr>
+<tr>
+<td><b>Helm Release</b></td>
+<td>$HelmRelease</td>
+</tr>
+<tr>
+<td><b>Namespace</b></td>
+<td>$Namespace</td>
+</tr>
+<tr>
+<td><b>Chart Path</b></td>
+<td>$ChartPath</td>
+</tr>
+<tr>
+<td><b>Running Pods</b></td>
+<td>$PodCount</td>
+</tr>
+<tr>
+<td><b>Expo Frontend Port</b></td>
+<td>$ExpoPort</td>
+</tr>
+<tr>
+<td><b>Total Execution Time</b></td>
+<td>$ExecutionDuration seconds</td>
+</tr>
+<tr>
+<td><b>Generated At</b></td>
+<td>$generatedAt</td>
+</tr>
+</table>
+
+<h3>Pipeline Workflow</h3>
+
+<p>
+Git Push &rarr; Docker Build &rarr; Docker Push &rarr; Helm Upgrade &rarr; Kubernetes Deployment
+</p>
+
+<h3>Attachment</h3>
+
+<p>
+Attached File: <b>helm-chart-output.yaml</b>
+</p>
+
+<br/>
+
+<p>Regards,<br/>
+<b>Automated DevOps Deployment Pipeline</b></p>
+
+</body>
+</html>
+"@
+
+        $mail.Attachments.Add($resolvedAttachment)
+        $mail.Send()
+
+        Write-Host "Outlook deployment mail sent successfully to $To" -ForegroundColor Green
+    } catch {
+        Write-Host "Outlook mail failed: $_" -ForegroundColor Yellow
+    }
+}
+
+function Send-SlackMessage {
+    param ([string]$messageText)
 
     if (Test-Path "./webhook.json") {
         $settings = Get-Content "./webhook.json" | ConvertFrom-Json
         $slackWebhookUrl = $settings.SLACK_WEBHOOK_URL.Trim()
 
-        $bodyObject = @{
-            text = $messageText
-        }
-
+        $bodyObject = @{ text = $messageText }
         $jsonBody = $bodyObject | ConvertTo-Json -Compress
 
         Invoke-RestMethod `
@@ -379,12 +490,30 @@ try {
 }
 
 Write-Output ""
+Write-Output "SENDING STANDARD DEVOPS OUTLOOK DEPLOYMENT MAIL..."
+
+Send-OutlookDeploymentMail `
+    -To $outlookTo `
+    -Subject $outlookSubject `
+    -DockerImage $dockerImage `
+    -ImageTag $buildTag `
+    -HelmRelease $helmRelease `
+    -Namespace $namespace `
+    -ChartPath $helmChartPath `
+    -AttachmentPath $helmChartOutputFile `
+    -DeploymentStatus "Successful" `
+    -PodCount $podCount `
+    -ExpoPort $expoPort `
+    -ExecutionDuration $executionDuration
+
+Write-Output ""
 Write-Output "--------------------------------------------------"
 Write-Output "SUCCESS: CICD pipeline completed."
 Write-Output "Docker Image: ${dockerImage}:$buildTag"
 Write-Output "Helm Release: $helmRelease"
 Write-Output "Namespace: $namespace"
 Write-Output "Single Helm Output File: $helmChartOutputFile"
+Write-Output "Outlook Mail Sent To: $outlookTo"
 Write-Output "Expo Frontend Port: $expoPort"
 Write-Output "Total Time: $executionDuration seconds"
 Write-Output "--------------------------------------------------"
