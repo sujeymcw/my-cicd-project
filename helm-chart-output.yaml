@@ -1,9 +1,9 @@
 ﻿# ============================================================
 # HELM CHART DEPLOYMENT OUTPUT
 # ============================================================
-# Generated At : 2026-06-08 14:12:14
+# Generated At : 2026-06-08 14:16:24
 # Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
-# Docker Image : sujeymcw/expo-web-app:local-20260608-141043
+# Docker Image : sujeymcw/expo-web-app:local-20260608-141516
 # Helm Release : expo-web-release
 # Namespace    : default
 # Chart Path   : ./charts/my-web-app
@@ -47,7 +47,7 @@ spec:
     spec:
       containers:
         - name: expo-web-container
-          image: "sujeymcw/expo-web-app:local-20260608-141043"
+          image: "sujeymcw/expo-web-app:local-20260608-141516"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -57,10 +57,10 @@ spec:
 # ============================================================
 
 NAME: expo-web-release
-LAST DEPLOYED: Mon Jun  8 14:12:08 2026
+LAST DEPLOYED: Mon Jun  8 14:16:20 2026
 NAMESPACE: default
 STATUS: deployed
-REVISION: 9
+REVISION: 10
 DESCRIPTION: Upgrade complete
 RESOURCES:
 ==> v1/Deployment
@@ -69,8 +69,8 @@ expo-web-deployment   1/1     1            1           19h
 
 ==> v1/Pod(related)
 NAME                                   READY   STATUS      RESTARTS   AGE
-expo-web-deployment-696548cbf7-l7hk7   1/1     Running     0          6s
-expo-web-deployment-6d644c5dc6-7ts5b   0/1     Completed   0          125m
+expo-web-deployment-696548cbf7-l7hk7   0/1     Completed   0          4m16s
+expo-web-deployment-6bcddfb5d4-wlh8x   1/1     Running     0          5s
 
 ==> v1/Service
 NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
@@ -80,7 +80,7 @@ expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   
 TEST SUITE: None
 NOTES:
 ======================================================================
-Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #9)
+Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #10)
 ======================================================================
 
 STATUS:       Successfully deployed to namespace "default"
@@ -91,7 +91,7 @@ UPDATED AT:
 
 ≡ƒÉ│  ACTIVE CONTAINER MANIFEST:
     Registry: sujeymcw/expo-web-app
-    Image Tag: local-20260608-141043
+    Image Tag: local-20260608-141516
     Pull Policy: IfNotPresent
 
 ≡ƒôè  REAL-TIME DIAGNOSTIC COMMANDS:
@@ -109,7 +109,7 @@ USER-SUPPLIED VALUES:
 image:
   imagePullPolicy: IfNotPresent
   repository: sujeymcw/expo-web-app
-  tag: local-20260608-141043
+  tag: local-20260608-141516
 service:
   port: 80
   type: LoadBalancer
@@ -119,15 +119,14 @@ service:
 # ============================================================
 
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS           IMAGES                                        SELECTOR
-expo-web-deployment   1/1     1            1           19h   expo-web-container   sujeymcw/expo-web-app:local-20260608-141043   app=expo-web-app
+expo-web-deployment   1/1     1            1           19h   expo-web-container   sujeymcw/expo-web-app:local-20260608-141516   app=expo-web-app
 
 # ============================================================
 # KUBERNETES POD STATUS
 # ============================================================
 
-NAME                                   READY   STATUS      RESTARTS   AGE    IP            NODE       NOMINATED NODE   READINESS GATES
-expo-web-deployment-696548cbf7-l7hk7   1/1     Running     0          7s     10.244.0.13   minikube   <none>           <none>
-expo-web-deployment-6d644c5dc6-7ts5b   0/1     Completed   0          125m   10.244.0.12   minikube   <none>           <none>
+NAME                                   READY   STATUS    RESTARTS   AGE   IP            NODE       NOMINATED NODE   READINESS GATES
+expo-web-deployment-6bcddfb5d4-wlh8x   1/1     Running   0          6s    10.244.0.14   minikube   <none>           <none>
 
 # ============================================================
 # KUBERNETES SERVICE STATUS
@@ -154,7 +153,7 @@ At line:1 char:1
 # ============================================================
 
 NAME       CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
-minikube   175m         1%       734Mi           10%         
+minikube   176m         1%       735Mi           10%         
 
 # ============================================================
 # METRICS STATUS
