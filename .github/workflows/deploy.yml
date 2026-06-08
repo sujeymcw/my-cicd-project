@@ -6,8 +6,8 @@ on:
       - main
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
+  build-and-push-deploy:
+    runs-on: self-hosted
 
     steps:
       - name: Checkout Code
@@ -28,144 +28,158 @@ jobs:
           no-cache: true
           tags: ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}
 
-      # 1. Install the Helm Engine binaries directly onto the Cloud Runner VM host
       - name: Set up Helm Client
         uses: azure/setup-helm@v4
         with:
-          version: 'v3.12.0'
+          version: v3.12.0
 
-      # 2. Securely restore your config directly from your repository secrets vault
-      - name: Setup Embedded Minikube Credentials
+      - name: Set up Kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Local Minikube Kubeconfig
+        shell: powershell
         run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBERNETES_KUBECONFIG }}" > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
+          kubectl config current-context
+          kubectl cluster-info
 
-      # 3. Compile the cloud Helm chart template logs cleanly matching your structural requirements
-      - name: Generate Cloud Helm Chart Output File
+      - name: Enable Metrics Server in Minikube
+        shell: powershell
         run: |
-          # Section 1: Main Header Metrics
-          echo "# ============================================================" > ./helm-chart-output.yaml
-          echo "# HELM CHART DEPLOYMENT OUTPUT" >> ./helm-chart-output.yaml
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "# Generated At : $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> ./helm-chart-output.yaml
-          echo "# Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment" >> ./helm-chart-output.yaml
-          echo "# Docker Image : ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}" >> ./helm-chart-output.yaml
-          echo "# Helm Release : expo-web-release" >> ./helm-chart-output.yaml
-          echo "# Namespace    : default" >> ./helm-chart-output.yaml
-          echo "# Chart Path   : ./charts/my-web-app" >> ./helm-chart-output.yaml
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "" >> ./helm-chart-output.yaml
-          
-          # Section 2: Manifest Generation Layout
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "# HELM RENDERED MANIFEST" >> ./helm-chart-output.yaml
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          helm template expo-web-release ./charts/my-web-app \
-            --set image.repository="${{ secrets.REGISTRY_USERNAME }}/expo-web-app" \
-            --set image.tag="${{ github.sha }}" \
-            --set image.imagePullPolicy="IfNotPresent" \
-            --set service.type="LoadBalancer" \
-            --set service.port=80 \
-            --namespace default >> ./helm-chart-output.yaml
-          echo "" >> ./helm-chart-output.yaml
+          minikube addons enable metrics-server
+          Start-Sleep -Seconds 30
+          kubectl get pods -n kube-system
 
-          # Section 3: Live Environment Config Validations
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "# HELM RELEASE STATUS" >> ./helm-chart-output.yaml
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "STATUS: deployed" >> ./helm-chart-output.yaml
-          echo "Live cloud runtime context successfully verified against local layout target." >> ./helm-chart-output.yaml
-          echo "" >> ./helm-chart-output.yaml
+      - name: Generate Helm Chart Output File
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
 
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "# HELM RELEASE VALUES" >> ./helm-chart-output.yaml
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "USER-SUPPLIED VALUES:" >> ./helm-chart-output.yaml
-          echo "image:" >> ./helm-chart-output.yaml
-          echo "  imagePullPolicy: IfNotPresent" >> ./helm-chart-output.yaml
-          echo "  repository: ${{ secrets.REGISTRY_USERNAME }}/expo-web-app" >> ./helm-chart-output.yaml
-          echo "  tag: ${{ github.sha }}" >> ./helm-chart-output.yaml
-          echo "service:" >> ./helm-chart-output.yaml
-          echo "  port: 80" >> ./helm-chart-output.yaml
-          echo "  type: LoadBalancer" >> ./helm-chart-output.yaml
-          echo "" >> ./helm-chart-output.yaml
+          $OUTPUT_FILE = "./helm-chart-output.yaml"
+          $RELEASE_NAME = "expo-web-release"
+          $CHART_PATH = "./charts/my-web-app"
+          $NAMESPACE = "default"
+          $IMAGE_REPO = "${{ secrets.REGISTRY_USERNAME }}/expo-web-app"
+          $IMAGE_TAG = "${{ github.sha }}"
 
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "# KUBERNETES DEPLOYMENT STATUS" >> ./helm-chart-output.yaml
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          kubectl get deployment --namespace default 2>&1 >> ./helm-chart-output.yaml || echo "Target layout validated." >> ./helm-chart-output.yaml
-          echo "" >> ./helm-chart-output.yaml
+          "# ============================================================" | Out-File $OUTPUT_FILE
+          "# HELM CHART DEPLOYMENT OUTPUT" | Out-File $OUTPUT_FILE -Append
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          "# Generated At : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File $OUTPUT_FILE -Append
+          "# Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment" | Out-File $OUTPUT_FILE -Append
+          "# Docker Image : ${IMAGE_REPO}:${IMAGE_TAG}" | Out-File $OUTPUT_FILE -Append
+          "# Helm Release : $RELEASE_NAME" | Out-File $OUTPUT_FILE -Append
+          "# Namespace    : $NAMESPACE" | Out-File $OUTPUT_FILE -Append
+          "# Chart Path   : $CHART_PATH" | Out-File $OUTPUT_FILE -Append
+          "# Runner Type  : Self Hosted Local Runner" | Out-File $OUTPUT_FILE -Append
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          "" | Out-File $OUTPUT_FILE -Append
 
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "# KUBERNETES POD STATUS" >> ./helm-chart-output.yaml
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          kubectl get pods --namespace default -o wide 2>&1 >> ./helm-chart-output.yaml
-          echo "" >> ./helm-chart-output.yaml
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          "# KUBERNETES CONNECTION CHECK" | Out-File $OUTPUT_FILE -Append
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          kubectl cluster-info 2>&1 | Out-File $OUTPUT_FILE -Append
+          "" | Out-File $OUTPUT_FILE -Append
 
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "# KUBERNETES SERVICE STATUS" >> ./helm-chart-output.yaml
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          kubectl get svc --namespace default -o wide 2>&1 >> ./helm-chart-output.yaml
-          echo "" >> ./helm-chart-output.yaml
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          "# HELM RENDERED MANIFEST" | Out-File $OUTPUT_FILE -Append
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          helm template $RELEASE_NAME $CHART_PATH `
+            --set image.repository="$IMAGE_REPO" `
+            --set image.tag="$IMAGE_TAG" `
+            --set image.imagePullPolicy="IfNotPresent" `
+            --set service.type="LoadBalancer" `
+            --set service.port=80 `
+            --namespace $NAMESPACE 2>&1 | Out-File $OUTPUT_FILE -Append
+          "" | Out-File $OUTPUT_FILE -Append
 
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "# POD CPU AND MEMORY METRICS" >> ./helm-chart-output.yaml
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "kubectl : error: metrics not available yet" >> ./helm-chart-output.yaml
-          echo "" >> ./helm-chart-output.yaml
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          "# HELM UPGRADE OUTPUT" | Out-File $OUTPUT_FILE -Append
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          helm upgrade --install $RELEASE_NAME $CHART_PATH `
+            --set image.repository="$IMAGE_REPO" `
+            --set image.tag="$IMAGE_TAG" `
+            --set image.imagePullPolicy="IfNotPresent" `
+            --set service.type="LoadBalancer" `
+            --set service.port=80 `
+            --namespace $NAMESPACE `
+            --create-namespace 2>&1 | Out-File $OUTPUT_FILE -Append
+          "" | Out-File $OUTPUT_FILE -Append
 
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "# NODE CPU AND MEMORY METRICS" >> ./helm-chart-output.yaml
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "Host cluster telemetry tracking handled by separate metrics manager." >> ./helm-chart-output.yaml
-          echo "" >> ./helm-chart-output.yaml
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          "# HELM RELEASE STATUS" | Out-File $OUTPUT_FILE -Append
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          helm status $RELEASE_NAME --namespace $NAMESPACE 2>&1 | Out-File $OUTPUT_FILE -Append
+          "" | Out-File $OUTPUT_FILE -Append
 
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "# METRICS STATUS" >> ./helm-chart-output.yaml
-          echo "# ============================================================" >> ./helm-chart-output.yaml
-          echo "# Metrics Server : Active" >> ./helm-chart-output.yaml
-          echo "# Pod Metrics    : Captured using kubectl top pods" >> ./helm-chart-output.yaml
-          echo "# Node Metrics   : Captured using kubectl top nodes" >> ./helm-chart-output.yaml
-          echo "# ============================================================" >> ./helm-chart-output.yaml
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          "# HELM RELEASE VALUES" | Out-File $OUTPUT_FILE -Append
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          helm get values $RELEASE_NAME --namespace $NAMESPACE 2>&1 | Out-File $OUTPUT_FILE -Append
+          "" | Out-File $OUTPUT_FILE -Append
 
-      # 4. Intercept the file and upload it to the GitHub Web Interface UI as an immutable download
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          "# KUBERNETES DEPLOYMENT STATUS" | Out-File $OUTPUT_FILE -Append
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          kubectl get deployment --namespace $NAMESPACE -o wide 2>&1 | Out-File $OUTPUT_FILE -Append
+          "" | Out-File $OUTPUT_FILE -Append
+
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          "# KUBERNETES POD STATUS" | Out-File $OUTPUT_FILE -Append
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          kubectl get pods --namespace $NAMESPACE -o wide 2>&1 | Out-File $OUTPUT_FILE -Append
+          "" | Out-File $OUTPUT_FILE -Append
+
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          "# KUBERNETES SERVICE STATUS" | Out-File $OUTPUT_FILE -Append
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          kubectl get svc --namespace $NAMESPACE -o wide 2>&1 | Out-File $OUTPUT_FILE -Append
+          "" | Out-File $OUTPUT_FILE -Append
+
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          "# POD CPU AND MEMORY METRICS" | Out-File $OUTPUT_FILE -Append
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          kubectl top pods --namespace $NAMESPACE 2>&1 | Out-File $OUTPUT_FILE -Append
+          "" | Out-File $OUTPUT_FILE -Append
+
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          "# NODE CPU AND MEMORY METRICS" | Out-File $OUTPUT_FILE -Append
+          "# ============================================================" | Out-File $OUTPUT_FILE -Append
+          kubectl top nodes 2>&1 | Out-File $OUTPUT_FILE -Append
+          "" | Out-File $OUTPUT_FILE -Append
+
+          Get-Content $OUTPUT_FILE
+
       - name: Upload Helm Output Artifact to GitHub Run View
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: helm-chart-output-file
           path: ./helm-chart-output.yaml
           retention-days: 7
 
-      # 5. Connect securely to Outlook SMTP servers to send the email with the file attached
       - name: Send Deployment Status Email via Outlook
+        if: always()
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.office365.com
           server_port: 587
           username: ${{ secrets.OUTLOOK_MAIL_USERNAME }}
           password: ${{ secrets.OUTLOOK_MAIL_PASSWORD }}
-          subject: "🚀 GitOps Cloud Rollout Verification complete: sha-${{ github.sha }}"
+          subject: "GitOps Cloud Rollout Verification: ${{ github.sha }}"
           to: ${{ secrets.MAIL_RECIPIENT }}
-          from: "GitHub Actions Runner Control Deck <${{ secrets.OUTLOOK_MAIL_USERNAME }}>"
+          from: "GitHub Actions Runner <${{ secrets.OUTLOOK_MAIL_USERNAME }}>"
           secure: false
           priority: high
           attachments: ./helm-chart-output.yaml
           body: |
             Hello Team,
 
-            The cloud integration pipeline workflow has finished processing.
+            The CICD pipeline has completed.
 
-            ============================================================
-            PIPELINE STATUS SUMMARY
-            ============================================================
-            Operator Account      : ${{ github.actor }}
-            Git Repository Branch : ${{ github.ref_name }}
-            Docker Image Target   : ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}
-            Pushed Commit Message : "${{ github.event.head_commit.message }}"
-            ============================================================
+            Docker Image:
+            ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}
 
-            The comprehensive 'helm-chart-output.yaml' diagnostic sheet has been generated, compiled, and is directly attached to this automated status alert email for evaluation.
+            The Helm output file is attached.
 
             Best Regards,
-            Automated GitOps DevOps Daemon Engine
+            GitHub Actions
