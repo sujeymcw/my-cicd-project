@@ -1,9 +1,9 @@
 ﻿# ============================================================
 # HELM CHART DEPLOYMENT OUTPUT
 # ============================================================
-# Generated At : 2026-06-07 22:26:30
+# Generated At : 2026-06-08 09:34:13
 # Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
-# Docker Image : sujeymcw/expo-web-app:local-20260607-222346
+# Docker Image : sujeymcw/expo-web-app:local-20260608-093245
 # Helm Release : expo-web-release
 # Namespace    : default
 # Chart Path   : ./charts/my-web-app
@@ -47,7 +47,7 @@ spec:
     spec:
       containers:
         - name: expo-web-container
-          image: "sujeymcw/expo-web-app:local-20260607-222346"
+          image: "sujeymcw/expo-web-app:local-20260608-093245"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -57,30 +57,30 @@ spec:
 # ============================================================
 
 NAME: expo-web-release
-LAST DEPLOYED: Sun Jun  7 22:26:22 2026
+LAST DEPLOYED: Mon Jun  8 09:34:08 2026
 NAMESPACE: default
 STATUS: deployed
-REVISION: 5
+REVISION: 6
 DESCRIPTION: Upgrade complete
 RESOURCES:
 ==> v1/Service
 NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
-expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   3h49m
+expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   14h
 
 ==> v1/Deployment
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
-expo-web-deployment   1/1     1            1           3h49m
+expo-web-deployment   1/1     1            1           14h
 
 ==> v1/Pod(related)
-NAME                                   READY   STATUS      RESTARTS   AGE
-expo-web-deployment-74d49c697d-wjrsx   1/1     Running     0          9s
-expo-web-deployment-cd7f546f7-rkf72    0/1     Completed   0          44m
+NAME                                   READY   STATUS        RESTARTS   AGE
+expo-web-deployment-6bf9cc866f-scc7q   1/1     Running       0          6s
+expo-web-deployment-74d49c697d-wjrsx   1/1     Terminating   0          11h
 
 
 TEST SUITE: None
 NOTES:
 ======================================================================
-Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #5)
+Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #6)
 ======================================================================
 
 STATUS:       Successfully deployed to namespace "default"
@@ -91,7 +91,7 @@ UPDATED AT:
 
 ≡ƒÉ│  ACTIVE CONTAINER MANIFEST:
     Registry: sujeymcw/expo-web-app
-    Image Tag: local-20260607-222346
+    Image Tag: local-20260608-093245
     Pull Policy: IfNotPresent
 
 ≡ƒôè  REAL-TIME DIAGNOSTIC COMMANDS:
@@ -109,7 +109,7 @@ USER-SUPPLIED VALUES:
 image:
   imagePullPolicy: IfNotPresent
   repository: sujeymcw/expo-web-app
-  tag: local-20260607-222346
+  tag: local-20260608-093245
 service:
   port: 80
   type: LoadBalancer
@@ -118,23 +118,24 @@ service:
 # KUBERNETES DEPLOYMENT STATUS
 # ============================================================
 
-NAME                  READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS           IMAGES                                        SELECTOR
-expo-web-deployment   1/1     1            1           3h49m   expo-web-container   sujeymcw/expo-web-app:local-20260607-222346   app=expo-web-app
+NAME                  READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS           IMAGES                                        SELECTOR
+expo-web-deployment   1/1     1            1           14h   expo-web-container   sujeymcw/expo-web-app:local-20260608-093245   app=expo-web-app
 
 # ============================================================
 # KUBERNETES POD STATUS
 # ============================================================
 
-NAME                                   READY   STATUS    RESTARTS   AGE   IP           NODE       NOMINATED NODE   READINESS GATES
-expo-web-deployment-74d49c697d-wjrsx   1/1     Running   0          11s   10.244.0.9   minikube   <none>           <none>
+NAME                                   READY   STATUS      RESTARTS   AGE   IP            NODE       NOMINATED NODE   READINESS GATES
+expo-web-deployment-6bf9cc866f-scc7q   1/1     Running     0          7s    10.244.0.10   minikube   <none>           <none>
+expo-web-deployment-74d49c697d-wjrsx   0/1     Completed   0          11h   10.244.0.9    minikube   <none>           <none>
 
 # ============================================================
 # KUBERNETES SERVICE STATUS
 # ============================================================
 
-NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE     SELECTOR
-expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   3h49m   app=expo-web-app
-kubernetes         ClusterIP      10.96.0.1        <none>        443/TCP        3h53m   <none>
+NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE   SELECTOR
+expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   14h   app=expo-web-app
+kubernetes         ClusterIP      10.96.0.1        <none>        443/TCP        15h   <none>
 
 # ============================================================
 # POD CPU AND MEMORY METRICS
@@ -144,8 +145,7 @@ kubectl : error: metrics not available yet
 At line:1 char:1
 + kubectl top pods --namespace default 2>&1
 + ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (error: metrics not available yet:String) [], RemoteExc 
-   eption
+    + CategoryInfo          : NotSpecified: (error: metrics not available yet:String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
  
 
@@ -154,7 +154,7 @@ At line:1 char:1
 # ============================================================
 
 NAME       CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
-minikube   344m         2%       733Mi           10%         
+minikube   172m         1%       736Mi           10%         
 
 # ============================================================
 # METRICS STATUS
