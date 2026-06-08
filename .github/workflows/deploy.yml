@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-and-push-deploy:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
@@ -36,118 +36,118 @@ jobs:
       - name: Set up Kubectl
         uses: azure/setup-kubectl@v4
 
-      - name: Setup Local Minikube Kubeconfig
-        shell: powershell
+      - name: Setup Kubernetes Kubeconfig
         run: |
-          kubectl config current-context
-          kubectl cluster-info
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBERNETES_KUBECONFIG }}" > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
 
-      - name: Enable Metrics Server in Minikube
-        shell: powershell
+      - name: Generate Cloud Helm Chart Output File
         run: |
-          minikube addons enable metrics-server
-          Start-Sleep -Seconds 30
-          kubectl get pods -n kube-system
+          set +e
 
-      - name: Generate Helm Chart Output File
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Continue"
+          OUTPUT_FILE="./helm-chart-output.yaml"
+          RELEASE_NAME="expo-web-release"
+          CHART_PATH="./charts/my-web-app"
+          NAMESPACE="default"
+          IMAGE_REPO="${{ secrets.REGISTRY_USERNAME }}/expo-web-app"
+          IMAGE_TAG="${{ github.sha }}"
 
-          $OUTPUT_FILE = "./helm-chart-output.yaml"
-          $RELEASE_NAME = "expo-web-release"
-          $CHART_PATH = "./charts/my-web-app"
-          $NAMESPACE = "default"
-          $IMAGE_REPO = "${{ secrets.REGISTRY_USERNAME }}/expo-web-app"
-          $IMAGE_TAG = "${{ github.sha }}"
+          echo "# ============================================================" > $OUTPUT_FILE
+          echo "# HELM CHART DEPLOYMENT OUTPUT" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          echo "# Generated At : $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $OUTPUT_FILE
+          echo "# Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment" >> $OUTPUT_FILE
+          echo "# Docker Image : $IMAGE_REPO:$IMAGE_TAG" >> $OUTPUT_FILE
+          echo "# Helm Release : $RELEASE_NAME" >> $OUTPUT_FILE
+          echo "# Namespace    : $NAMESPACE" >> $OUTPUT_FILE
+          echo "# Chart Path   : $CHART_PATH" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          echo "" >> $OUTPUT_FILE
 
-          "# ============================================================" | Out-File $OUTPUT_FILE
-          "# HELM CHART DEPLOYMENT OUTPUT" | Out-File $OUTPUT_FILE -Append
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          "# Generated At : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File $OUTPUT_FILE -Append
-          "# Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment" | Out-File $OUTPUT_FILE -Append
-          "# Docker Image : ${IMAGE_REPO}:${IMAGE_TAG}" | Out-File $OUTPUT_FILE -Append
-          "# Helm Release : $RELEASE_NAME" | Out-File $OUTPUT_FILE -Append
-          "# Namespace    : $NAMESPACE" | Out-File $OUTPUT_FILE -Append
-          "# Chart Path   : $CHART_PATH" | Out-File $OUTPUT_FILE -Append
-          "# Runner Type  : Self Hosted Local Runner" | Out-File $OUTPUT_FILE -Append
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          "" | Out-File $OUTPUT_FILE -Append
+          echo "# ============================================================" >> $OUTPUT_FILE
+          echo "# KUBERNETES CONNECTION CHECK" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          kubectl cluster-info >> $OUTPUT_FILE 2>&1
+          CONNECTION_STATUS=$?
 
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          "# KUBERNETES CONNECTION CHECK" | Out-File $OUTPUT_FILE -Append
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          kubectl cluster-info 2>&1 | Out-File $OUTPUT_FILE -Append
-          "" | Out-File $OUTPUT_FILE -Append
+          if [ $CONNECTION_STATUS -ne 0 ]; then
+            echo "" >> $OUTPUT_FILE
+            echo "# ERROR: Kubernetes cluster is not reachable from GitHub Actions runner." >> $OUTPUT_FILE
+            echo "# Reason: Your kubeconfig is pointing to localhost / Minikube." >> $OUTPUT_FILE
+            echo "# Fix: Use a real cloud Kubernetes cluster like EKS, AKS, GKE, or self-hosted runner on your local machine." >> $OUTPUT_FILE
+            cat $OUTPUT_FILE
+            exit 1
+          fi
 
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          "# HELM RENDERED MANIFEST" | Out-File $OUTPUT_FILE -Append
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          helm template $RELEASE_NAME $CHART_PATH `
-            --set image.repository="$IMAGE_REPO" `
-            --set image.tag="$IMAGE_TAG" `
-            --set image.imagePullPolicy="IfNotPresent" `
-            --set service.type="LoadBalancer" `
-            --set service.port=80 `
-            --namespace $NAMESPACE 2>&1 | Out-File $OUTPUT_FILE -Append
-          "" | Out-File $OUTPUT_FILE -Append
+          echo "" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          echo "# HELM RENDERED MANIFEST" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          helm template $RELEASE_NAME $CHART_PATH \
+            --set image.repository="$IMAGE_REPO" \
+            --set image.tag="$IMAGE_TAG" \
+            --set image.imagePullPolicy="IfNotPresent" \
+            --set service.type="LoadBalancer" \
+            --set service.port=80 \
+            --namespace $NAMESPACE >> $OUTPUT_FILE 2>&1
 
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          "# HELM UPGRADE OUTPUT" | Out-File $OUTPUT_FILE -Append
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          helm upgrade --install $RELEASE_NAME $CHART_PATH `
-            --set image.repository="$IMAGE_REPO" `
-            --set image.tag="$IMAGE_TAG" `
-            --set image.imagePullPolicy="IfNotPresent" `
-            --set service.type="LoadBalancer" `
-            --set service.port=80 `
-            --namespace $NAMESPACE `
-            --create-namespace 2>&1 | Out-File $OUTPUT_FILE -Append
-          "" | Out-File $OUTPUT_FILE -Append
+          echo "" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          echo "# HELM UPGRADE OUTPUT" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          helm upgrade --install $RELEASE_NAME $CHART_PATH \
+            --set image.repository="$IMAGE_REPO" \
+            --set image.tag="$IMAGE_TAG" \
+            --set image.imagePullPolicy="IfNotPresent" \
+            --set service.type="LoadBalancer" \
+            --set service.port=80 \
+            --namespace $NAMESPACE \
+            --create-namespace >> $OUTPUT_FILE 2>&1
 
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          "# HELM RELEASE STATUS" | Out-File $OUTPUT_FILE -Append
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          helm status $RELEASE_NAME --namespace $NAMESPACE 2>&1 | Out-File $OUTPUT_FILE -Append
-          "" | Out-File $OUTPUT_FILE -Append
+          echo "" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          echo "# HELM RELEASE STATUS" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          helm status $RELEASE_NAME --namespace $NAMESPACE >> $OUTPUT_FILE 2>&1
 
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          "# HELM RELEASE VALUES" | Out-File $OUTPUT_FILE -Append
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          helm get values $RELEASE_NAME --namespace $NAMESPACE 2>&1 | Out-File $OUTPUT_FILE -Append
-          "" | Out-File $OUTPUT_FILE -Append
+          echo "" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          echo "# HELM RELEASE VALUES" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          helm get values $RELEASE_NAME --namespace $NAMESPACE >> $OUTPUT_FILE 2>&1
 
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          "# KUBERNETES DEPLOYMENT STATUS" | Out-File $OUTPUT_FILE -Append
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          kubectl get deployment --namespace $NAMESPACE -o wide 2>&1 | Out-File $OUTPUT_FILE -Append
-          "" | Out-File $OUTPUT_FILE -Append
+          echo "" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          echo "# KUBERNETES DEPLOYMENT STATUS" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          kubectl get deployment --namespace $NAMESPACE -o wide >> $OUTPUT_FILE 2>&1
 
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          "# KUBERNETES POD STATUS" | Out-File $OUTPUT_FILE -Append
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          kubectl get pods --namespace $NAMESPACE -o wide 2>&1 | Out-File $OUTPUT_FILE -Append
-          "" | Out-File $OUTPUT_FILE -Append
+          echo "" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          echo "# KUBERNETES POD STATUS" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          kubectl get pods --namespace $NAMESPACE -o wide >> $OUTPUT_FILE 2>&1
 
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          "# KUBERNETES SERVICE STATUS" | Out-File $OUTPUT_FILE -Append
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          kubectl get svc --namespace $NAMESPACE -o wide 2>&1 | Out-File $OUTPUT_FILE -Append
-          "" | Out-File $OUTPUT_FILE -Append
+          echo "" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          echo "# KUBERNETES SERVICE STATUS" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          kubectl get svc --namespace $NAMESPACE -o wide >> $OUTPUT_FILE 2>&1
 
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          "# POD CPU AND MEMORY METRICS" | Out-File $OUTPUT_FILE -Append
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          kubectl top pods --namespace $NAMESPACE 2>&1 | Out-File $OUTPUT_FILE -Append
-          "" | Out-File $OUTPUT_FILE -Append
+          echo "" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          echo "# POD CPU AND MEMORY METRICS" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          kubectl top pods --namespace $NAMESPACE >> $OUTPUT_FILE 2>&1 || echo "Metrics Server not available yet." >> $OUTPUT_FILE
 
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          "# NODE CPU AND MEMORY METRICS" | Out-File $OUTPUT_FILE -Append
-          "# ============================================================" | Out-File $OUTPUT_FILE -Append
-          kubectl top nodes 2>&1 | Out-File $OUTPUT_FILE -Append
-          "" | Out-File $OUTPUT_FILE -Append
+          echo "" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          echo "# NODE CPU AND MEMORY METRICS" >> $OUTPUT_FILE
+          echo "# ============================================================" >> $OUTPUT_FILE
+          kubectl top nodes >> $OUTPUT_FILE 2>&1 || echo "Metrics Server not available yet." >> $OUTPUT_FILE
 
-          Get-Content $OUTPUT_FILE
+          cat $OUTPUT_FILE
 
       - name: Upload Helm Output Artifact to GitHub Run View
         if: always()
