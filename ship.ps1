@@ -1,11 +1,12 @@
 # ============================================================
 # Git Push -> Docker Build -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
 # Full DevOps CICD Script with Backend + Expo Auto Launch + Clean Helm Output + Outlook Mail
-# Optimized + Metrics Server Retry Fix
+# Final Optimized Version + Metrics Fix
 # ============================================================
 
 $ErrorActionPreference = "Stop"
 $env:DOCKER_BUILDKIT = "1"
+$env:BUILDKIT_PROGRESS = "plain"
 
 $pipelineStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $buildTag = "local-" + (Get-Date -Format "yyyyMMdd-HHmmss")
@@ -23,6 +24,7 @@ $dockerImage = "sujeymcw/expo-web-app"
 $helmRelease = "expo-web-release"
 $helmChartPath = "./charts/my-web-app"
 $namespace = "default"
+$deploymentName = "expo-web-deployment"
 
 # Output file
 $helmChartOutputFile = "./helm-chart-output.yaml"
@@ -30,6 +32,9 @@ $helmChartOutputFile = "./helm-chart-output.yaml"
 # Outlook mail configuration
 $outlookTo = "sujey.hariprasad@multicorewareinc.com"
 $outlookSubject = "CICD Deployment Successful - $helmRelease - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+
+# Docker cache image
+$dockerCacheImage = "${dockerImage}:buildcache"
 
 function Test-CommandExists {
     param ([string]$CommandName)
@@ -46,6 +51,15 @@ function Invoke-RequiredCommandCheck {
             Write-Error "$commandName is not installed or not available in PATH."
             exit 1
         }
+    }
+}
+
+function Test-DockerBuildxAvailable {
+    try {
+        docker buildx version 1>$null 2>$null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
     }
 }
 
@@ -114,11 +128,11 @@ function Enable-MetricsServerIfPossible {
 
 function Wait-ForMetricsServer {
     param (
-        [int]$MaxAttempts = 20,
-        [int]$SleepSeconds = 6
+        [int]$MaxAttempts = 5,
+        [int]$SleepSeconds = 3
     )
 
-    Write-Output "Waiting for Metrics Server API to become available..."
+    Write-Output "Waiting shortly for Metrics Server API..."
 
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         try {
@@ -137,7 +151,7 @@ function Wait-ForMetricsServer {
         }
     }
 
-    Write-Host "Metrics Server is installed but metrics are still warming up." -ForegroundColor Yellow
+    Write-Host "Metrics Server is active but metrics are still warming up." -ForegroundColor Yellow
     return $false
 }
 
@@ -148,56 +162,38 @@ function Write-MetricsToFile {
     )
 
     Enable-MetricsServerIfPossible
-    $metricsReady = Wait-ForMetricsServer -MaxAttempts 20 -SleepSeconds 6
+    $metricsReady = Wait-ForMetricsServer -MaxAttempts 5 -SleepSeconds 3
 
     Add-SectionToFile -Title "POD CPU AND MEMORY METRICS" -OutputFile $OutputFile
 
     if ($metricsReady) {
-        try {
-            $podMetrics = kubectl top pods --namespace $Namespace 2>&1
+        $podMetrics = kubectl top pods --namespace $Namespace 2>&1
 
-            if ($LASTEXITCODE -eq 0) {
-                $podMetrics | Out-File $OutputFile -Append -Encoding UTF8
-            } else {
-                "kubectl top pods failed after retry. Capturing pod resource fallback." | Out-File $OutputFile -Append -Encoding UTF8
-                kubectl get pods --namespace $Namespace -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-                kubectl describe pods --namespace $Namespace 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-            }
-        } catch {
-            "Pod metrics capture failed. Capturing fallback pod details." | Out-File $OutputFile -Append -Encoding UTF8
+        if ($LASTEXITCODE -eq 0) {
+            $podMetrics | Out-File $OutputFile -Append -Encoding UTF8
+        } else {
+            "kubectl top pods failed. Showing pod fallback summary." | Out-File $OutputFile -Append -Encoding UTF8
             kubectl get pods --namespace $Namespace -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-            kubectl describe pods --namespace $Namespace 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
         }
     } else {
-        "Metrics Server is active but Kubernetes has not produced metrics yet." | Out-File $OutputFile -Append -Encoding UTF8
-        "Fallback captured below: pod status, requests, limits, and node allocation details." | Out-File $OutputFile -Append -Encoding UTF8
+        "Metrics are not ready yet. Showing pod fallback summary instead of failing pipeline." | Out-File $OutputFile -Append -Encoding UTF8
         kubectl get pods --namespace $Namespace -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-        kubectl describe pods --namespace $Namespace 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
     }
 
     Add-SectionToFile -Title "NODE CPU AND MEMORY METRICS" -OutputFile $OutputFile
 
     if ($metricsReady) {
-        try {
-            $nodeMetrics = kubectl top nodes 2>&1
+        $nodeMetrics = kubectl top nodes 2>&1
 
-            if ($LASTEXITCODE -eq 0) {
-                $nodeMetrics | Out-File $OutputFile -Append -Encoding UTF8
-            } else {
-                "kubectl top nodes failed after retry. Capturing node fallback." | Out-File $OutputFile -Append -Encoding UTF8
-                kubectl get nodes -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-                kubectl describe nodes 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-            }
-        } catch {
-            "Node metrics capture failed. Capturing fallback node details." | Out-File $OutputFile -Append -Encoding UTF8
+        if ($LASTEXITCODE -eq 0) {
+            $nodeMetrics | Out-File $OutputFile -Append -Encoding UTF8
+        } else {
+            "kubectl top nodes failed. Showing node fallback summary." | Out-File $OutputFile -Append -Encoding UTF8
             kubectl get nodes -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-            kubectl describe nodes 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
         }
     } else {
-        "Metrics Server is active but node metrics are not ready yet." | Out-File $OutputFile -Append -Encoding UTF8
-        "Fallback captured below: node status and allocation details." | Out-File $OutputFile -Append -Encoding UTF8
+        "Metrics are not ready yet. Showing node fallback summary instead of failing pipeline." | Out-File $OutputFile -Append -Encoding UTF8
         kubectl get nodes -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-        kubectl describe nodes 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
     }
 
 @"
@@ -206,8 +202,8 @@ function Write-MetricsToFile {
 # METRICS STATUS
 # ============================================================
 # Metrics Server Checked : Yes
-# Metrics Capture Mode   : kubectl top with retry
-# Fallback Mode          : kubectl describe pods/nodes if live metrics are warming up
+# Metrics Capture Mode   : kubectl top with short retry
+# Fallback Mode          : kubectl get pods/nodes if live metrics are warming up
 # ============================================================
 
 "@ | Out-File $OutputFile -Append -Encoding UTF8
@@ -332,7 +328,7 @@ function Clear-Port8000 {
             }
         }
 
-        Start-Sleep -Seconds 1
+        Start-Sleep -Milliseconds 500
         Write-Host "Port 8000 cleanup completed." -ForegroundColor Green
     } catch {
         Write-Host "Socket release sweep finished." -ForegroundColor Yellow
@@ -378,7 +374,8 @@ function Send-SlackFailure {
 function Write-HelmChartOutput {
     param (
         [string]$ImageName,
-        [string]$ImageTag
+        [string]$ImageTag,
+        [string]$ImagePullPolicy
     )
 
     Write-Output ""
@@ -400,7 +397,7 @@ function Write-HelmChartOutput {
 
     Invoke-SafeCommandToFile `
         -Title "HELM RENDERED MANIFEST" `
-        -CommandText "helm template $helmRelease $helmChartPath --set image.repository='$ImageName' --set image.tag='$ImageTag' --set image.imagePullPolicy='IfNotPresent' --set service.type='LoadBalancer' --set service.port=80 --namespace $namespace" `
+        -CommandText "helm template $helmRelease $helmChartPath --set image.repository='$ImageName' --set image.tag='$ImageTag' --set image.imagePullPolicy='$ImagePullPolicy' --set service.type='LoadBalancer' --set service.port=80 --namespace $namespace" `
         -OutputFile $helmChartOutputFile
 
     Invoke-SafeCommandToFile `
@@ -455,14 +452,14 @@ Write-Output "Waiting for backend API server to bind cleanly to port 8000..."
 
 $backendReady = $false
 
-for ($i = 1; $i -le 15; $i++) {
+for ($i = 1; $i -le 10; $i++) {
     try {
         Invoke-WebRequest "http://127.0.0.1:8000" -TimeoutSec 1 | Out-Null
         $backendReady = $true
         Write-Host "Backend API server is ready." -ForegroundColor Green
         break
     } catch {
-        Start-Sleep -Milliseconds 500
+        Start-Sleep -Milliseconds 300
     }
 }
 
@@ -510,30 +507,48 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Output ""
-Write-Output "STAGE 2: Building Docker image with BuildKit optimization..."
-
-docker build `
-    -f ./Dockerfile `
-    -t "${dockerImage}:$buildTag" `
-    --pull=false `
-    .
-
-if ($LASTEXITCODE -ne 0) {
-    Send-SlackFailure "STAGE 2 - Docker Build" "Docker image build failed."
-}
-
-Write-Host "Docker image created: ${dockerImage}:$buildTag" -ForegroundColor Green
-
-Write-Output ""
+Write-Output "STAGE 2: Building Docker image..."
 Write-Output "STAGE 3: Pushing Docker image to registry..."
 
-docker push "${dockerImage}:$buildTag"
+$imagePullPolicy = "Always"
 
-if ($LASTEXITCODE -ne 0) {
-    Send-SlackFailure "STAGE 3 - Docker Push" "Docker image push failed. Check Docker login and repository access."
+if (Test-DockerBuildxAvailable) {
+    Write-Host "Using Docker Buildx with registry cache for faster build and push." -ForegroundColor Cyan
+
+    docker buildx create --use --name fast-cicd-builder 2>$null
+
+    docker buildx build `
+        -f ./Dockerfile `
+        -t "${dockerImage}:$buildTag" `
+        --cache-from "type=registry,ref=$dockerCacheImage" `
+        --cache-to "type=registry,ref=$dockerCacheImage,mode=max" `
+        --push `
+        .
+
+    if ($LASTEXITCODE -ne 0) {
+        Send-SlackFailure "STAGE 2/3 - Docker Buildx Build and Push" "Docker buildx build and registry push failed."
+    }
+} else {
+    Write-Host "Docker Buildx not available. Falling back to standard Docker build and push." -ForegroundColor Yellow
+
+    docker build `
+        -f ./Dockerfile `
+        -t "${dockerImage}:$buildTag" `
+        --pull=false `
+        .
+
+    if ($LASTEXITCODE -ne 0) {
+        Send-SlackFailure "STAGE 2 - Docker Build" "Docker image build failed."
+    }
+
+    docker push "${dockerImage}:$buildTag"
+
+    if ($LASTEXITCODE -ne 0) {
+        Send-SlackFailure "STAGE 3 - Docker Push" "Docker image push failed. Check Docker login and repository access."
+    }
 }
 
-Write-Host "Docker image pushed: ${dockerImage}:$buildTag" -ForegroundColor Green
+Write-Host "Docker image built and pushed: ${dockerImage}:$buildTag" -ForegroundColor Green
 
 Write-Output ""
 Write-Output "STAGE 4: Deploying to Kubernetes using Helm..."
@@ -541,24 +556,26 @@ Write-Output "STAGE 4: Deploying to Kubernetes using Helm..."
 helm upgrade --install $helmRelease $helmChartPath `
     --set image.repository="$dockerImage" `
     --set image.tag="$buildTag" `
-    --set image.imagePullPolicy="IfNotPresent" `
+    --set image.imagePullPolicy="$imagePullPolicy" `
     --set service.type="LoadBalancer" `
     --set service.port=80 `
     --namespace $namespace `
-    --create-namespace
+    --create-namespace `
+    --wait `
+    --timeout 60s
 
 if ($LASTEXITCODE -ne 0) {
     Send-SlackFailure "STAGE 4 - Helm Upgrade" "Helm upgrade failed."
 }
 
 Write-Output ""
-Write-Output "Waiting for Kubernetes rollout..."
+Write-Output "Waiting for Kubernetes deployment availability..."
 
 kubectl wait `
     --for=condition=available `
-    deployment/expo-web-deployment `
+    deployment/$deploymentName `
     --namespace $namespace `
-    --timeout=90s
+    --timeout=45s
 
 if ($LASTEXITCODE -ne 0) {
     Send-SlackFailure "STAGE 4 - Kubernetes Rollout" "Deployment did not become available within timeout."
@@ -567,7 +584,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Output ""
 Write-Output "STAGE 5: Creating one proper Helm chart output file..."
 
-Write-HelmChartOutput -ImageName $dockerImage -ImageTag $buildTag
+Write-HelmChartOutput -ImageName $dockerImage -ImageTag $buildTag -ImagePullPolicy $imagePullPolicy
 
 $runningPods = kubectl get pods --namespace $namespace --no-headers 2>$null | Select-String "Running"
 $podCount = @($runningPods).Count
@@ -615,6 +632,7 @@ Send-OutlookDeploymentMail `
 Write-Output ""
 Write-Output "--------------------------------------------------"
 Write-Output "SUCCESS: CICD pipeline completed."
+Write-Output "Workflow: Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment"
 Write-Output "Docker Image: ${dockerImage}:$buildTag"
 Write-Output "Helm Release: $helmRelease"
 Write-Output "Namespace: $namespace"

@@ -1,9 +1,9 @@
 ﻿# ============================================================
 # HELM CHART DEPLOYMENT OUTPUT
 # ============================================================
-# Generated At : 2026-06-08 14:16:24
+# Generated At : 2026-06-08 14:36:39
 # Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
-# Docker Image : sujeymcw/expo-web-app:local-20260608-141516
+# Docker Image : sujeymcw/expo-web-app:local-20260608-143507
 # Helm Release : expo-web-release
 # Namespace    : default
 # Chart Path   : ./charts/my-web-app
@@ -47,7 +47,7 @@ spec:
     spec:
       containers:
         - name: expo-web-container
-          image: "sujeymcw/expo-web-app:local-20260608-141516"
+          image: "sujeymcw/expo-web-app:local-20260608-143507"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -57,30 +57,30 @@ spec:
 # ============================================================
 
 NAME: expo-web-release
-LAST DEPLOYED: Mon Jun  8 14:16:20 2026
+LAST DEPLOYED: Mon Jun  8 14:36:38 2026
 NAMESPACE: default
 STATUS: deployed
-REVISION: 10
+REVISION: 11
 DESCRIPTION: Upgrade complete
 RESOURCES:
+==> v1/Service
+NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
+expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   19h
+
 ==> v1/Deployment
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
 expo-web-deployment   1/1     1            1           19h
 
 ==> v1/Pod(related)
-NAME                                   READY   STATUS      RESTARTS   AGE
-expo-web-deployment-696548cbf7-l7hk7   0/1     Completed   0          4m16s
-expo-web-deployment-6bcddfb5d4-wlh8x   1/1     Running     0          5s
-
-==> v1/Service
-NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
-expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   19h
+NAME                                   READY   STATUS              RESTARTS   AGE
+expo-web-deployment-6bcddfb5d4-wlh8x   1/1     Running             0          20m
+expo-web-deployment-76744b8bb4-bkqnr   0/1     ContainerCreating   0          0s
 
 
 TEST SUITE: None
 NOTES:
 ======================================================================
-Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #10)
+Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #11)
 ======================================================================
 
 STATUS:       Successfully deployed to namespace "default"
@@ -91,7 +91,7 @@ UPDATED AT:
 
 ≡ƒÉ│  ACTIVE CONTAINER MANIFEST:
     Registry: sujeymcw/expo-web-app
-    Image Tag: local-20260608-141516
+    Image Tag: local-20260608-143507
     Pull Policy: IfNotPresent
 
 ≡ƒôè  REAL-TIME DIAGNOSTIC COMMANDS:
@@ -109,7 +109,7 @@ USER-SUPPLIED VALUES:
 image:
   imagePullPolicy: IfNotPresent
   repository: sujeymcw/expo-web-app
-  tag: local-20260608-141516
+  tag: local-20260608-143507
 service:
   port: 80
   type: LoadBalancer
@@ -119,14 +119,15 @@ service:
 # ============================================================
 
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS           IMAGES                                        SELECTOR
-expo-web-deployment   1/1     1            1           19h   expo-web-container   sujeymcw/expo-web-app:local-20260608-141516   app=expo-web-app
+expo-web-deployment   1/1     1            1           19h   expo-web-container   sujeymcw/expo-web-app:local-20260608-143507   app=expo-web-app
 
 # ============================================================
 # KUBERNETES POD STATUS
 # ============================================================
 
-NAME                                   READY   STATUS    RESTARTS   AGE   IP            NODE       NOMINATED NODE   READINESS GATES
-expo-web-deployment-6bcddfb5d4-wlh8x   1/1     Running   0          6s    10.244.0.14   minikube   <none>           <none>
+NAME                                   READY   STATUS              RESTARTS   AGE   IP            NODE       NOMINATED NODE   READINESS GATES
+expo-web-deployment-6bcddfb5d4-wlh8x   1/1     Running             0          20m   10.244.0.14   minikube   <none>           <none>
+expo-web-deployment-76744b8bb4-bkqnr   0/1     ContainerCreating   0          1s    <none>        minikube   <none>           <none>
 
 # ============================================================
 # KUBERNETES SERVICE STATUS
@@ -134,32 +135,27 @@ expo-web-deployment-6bcddfb5d4-wlh8x   1/1     Running   0          6s    10.244
 
 NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE   SELECTOR
 expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   19h   app=expo-web-app
-kubernetes         ClusterIP      10.96.0.1        <none>        443/TCP        19h   <none>
+kubernetes         ClusterIP      10.96.0.1        <none>        443/TCP        20h   <none>
 
 # ============================================================
 # POD CPU AND MEMORY METRICS
 # ============================================================
 
-kubectl : error: metrics not available yet
-At line:1 char:1
-+ kubectl top pods --namespace default 2>&1
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (error: metrics not available yet:String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
- 
+NAME                                   CPU(cores)   MEMORY(bytes)   
+expo-web-deployment-6bcddfb5d4-wlh8x   0m           13Mi            
 
 # ============================================================
 # NODE CPU AND MEMORY METRICS
 # ============================================================
 
 NAME       CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
-minikube   176m         1%       735Mi           10%         
+minikube   186m         1%       731Mi           10%         
 
 # ============================================================
 # METRICS STATUS
 # ============================================================
-# Metrics Server : Active
-# Pod Metrics    : Captured using kubectl top pods
-# Node Metrics   : Captured using kubectl top nodes
+# Metrics Server Checked : Yes
+# Metrics Capture Mode   : kubectl top with retry
+# Fallback Mode          : kubectl describe pods/nodes if live metrics are warming up
 # ============================================================
 
