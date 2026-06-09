@@ -1,9 +1,9 @@
 ﻿# ============================================================
 # HELM CHART DEPLOYMENT OUTPUT
 # ============================================================
-# Generated At : 2026-06-08 14:36:39
+# Generated At : 2026-06-09 11:28:57
 # Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
-# Docker Image : sujeymcw/expo-web-app:local-20260608-143507
+# Docker Image : sujeymcw/expo-web-app:local-20260609-112657
 # Helm Release : expo-web-release
 # Namespace    : default
 # Chart Path   : ./charts/my-web-app
@@ -47,7 +47,7 @@ spec:
     spec:
       containers:
         - name: expo-web-container
-          image: "sujeymcw/expo-web-app:local-20260608-143507"
+          image: "sujeymcw/expo-web-app:local-20260609-112657"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -57,30 +57,30 @@ spec:
 # ============================================================
 
 NAME: expo-web-release
-LAST DEPLOYED: Mon Jun  8 14:36:38 2026
+LAST DEPLOYED: Tue Jun  9 11:28:55 2026
 NAMESPACE: default
 STATUS: deployed
-REVISION: 11
+REVISION: 52
 DESCRIPTION: Upgrade complete
 RESOURCES:
 ==> v1/Service
-NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
-expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   19h
+NAME               TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)        AGE
+expo-web-service   LoadBalancer   10.96.43.180   172.18.0.2    80:30627/TCP   4d
 
 ==> v1/Deployment
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
-expo-web-deployment   1/1     1            1           19h
+expo-web-deployment   1/1     1            1           4d
 
 ==> v1/Pod(related)
-NAME                                   READY   STATUS              RESTARTS   AGE
-expo-web-deployment-6bcddfb5d4-wlh8x   1/1     Running             0          20m
-expo-web-deployment-76744b8bb4-bkqnr   0/1     ContainerCreating   0          0s
+NAME                                   READY   STATUS              RESTARTS       AGE
+expo-web-deployment-5c75585cb-sdnj9    1/1     Running             1 (2m9s ago)   41h
+expo-web-deployment-7fccd998fd-8f6lb   0/1     ContainerCreating   0              2s
 
 
 TEST SUITE: None
 NOTES:
 ======================================================================
-Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #11)
+Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #52)
 ======================================================================
 
 STATUS:       Successfully deployed to namespace "default"
@@ -91,7 +91,7 @@ UPDATED AT:
 
 ≡ƒÉ│  ACTIVE CONTAINER MANIFEST:
     Registry: sujeymcw/expo-web-app
-    Image Tag: local-20260608-143507
+    Image Tag: local-20260609-112657
     Pull Policy: IfNotPresent
 
 ≡ƒôè  REAL-TIME DIAGNOSTIC COMMANDS:
@@ -109,7 +109,7 @@ USER-SUPPLIED VALUES:
 image:
   imagePullPolicy: IfNotPresent
   repository: sujeymcw/expo-web-app
-  tag: local-20260608-143507
+  tag: local-20260609-112657
 service:
   port: 80
   type: LoadBalancer
@@ -119,37 +119,181 @@ service:
 # ============================================================
 
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS           IMAGES                                        SELECTOR
-expo-web-deployment   1/1     1            1           19h   expo-web-container   sujeymcw/expo-web-app:local-20260608-143507   app=expo-web-app
+expo-web-deployment   2/1     1            2           4d    expo-web-container   sujeymcw/expo-web-app:local-20260609-112657   app=expo-web-app
 
 # ============================================================
 # KUBERNETES POD STATUS
 # ============================================================
 
-NAME                                   READY   STATUS              RESTARTS   AGE   IP            NODE       NOMINATED NODE   READINESS GATES
-expo-web-deployment-6bcddfb5d4-wlh8x   1/1     Running             0          20m   10.244.0.14   minikube   <none>           <none>
-expo-web-deployment-76744b8bb4-bkqnr   0/1     ContainerCreating   0          1s    <none>        minikube   <none>           <none>
+NAME                                   READY   STATUS        RESTARTS        AGE   IP           NODE                    NOMINATED NODE   READINESS GATES
+expo-web-deployment-5c75585cb-sdnj9    1/1     Terminating   1 (2m10s ago)   41h   10.244.0.4   desktop-control-plane   <none>           <none>
+expo-web-deployment-7fccd998fd-8f6lb   1/1     Running       0               3s    10.244.0.6   desktop-control-plane   <none>           <none>
 
 # ============================================================
 # KUBERNETES SERVICE STATUS
 # ============================================================
 
-NAME               TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE   SELECTOR
-expo-web-service   LoadBalancer   10.106.179.116   <pending>     80:32525/TCP   19h   app=expo-web-app
-kubernetes         ClusterIP      10.96.0.1        <none>        443/TCP        20h   <none>
+NAME               TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)        AGE    SELECTOR
+expo-web-service   LoadBalancer   10.96.43.180   172.18.0.2    80:30627/TCP   4d     app=expo-web-app
+kubernetes         ClusterIP      10.96.0.1      <none>        443/TCP        4d1h   <none>
 
 # ============================================================
 # POD CPU AND MEMORY METRICS
 # ============================================================
 
-NAME                                   CPU(cores)   MEMORY(bytes)   
-expo-web-deployment-6bcddfb5d4-wlh8x   0m           13Mi            
+Pod metrics capture failed. Capturing fallback pod details.
+NAME                                   READY   STATUS    RESTARTS   AGE     IP           NODE                    NOMINATED NODE   READINESS GATES
+expo-web-deployment-7fccd998fd-8f6lb   1/1     Running   0          2m10s   10.244.0.6   desktop-control-plane   <none>           <none>
+Name:             expo-web-deployment-7fccd998fd-8f6lb
+Namespace:        default
+Priority:         0
+Service Account:  default
+Node:             desktop-control-plane/172.18.0.3
+Start Time:       Tue, 09 Jun 2026 11:28:56 +0530
+Labels:           app=expo-web-app
+                  pod-template-hash=7fccd998fd
+Annotations:      kubectl.kubernetes.io/restartedAt: 2026-06-07T18:19:19+05:30
+Status:           Running
+IP:               10.244.0.6
+IPs:
+  IP:           10.244.0.6
+Controlled By:  ReplicaSet/expo-web-deployment-7fccd998fd
+Containers:
+  expo-web-container:
+    Container ID:   containerd://9881870713fae0caf18de3d2cbb8d72a11878708b99da0ecae1bd02362794b38
+    Image:          sujeymcw/expo-web-app:local-20260609-112657
+    Image ID:       docker.io/sujeymcw/expo-web-app@sha256:1c5e6e2ae7175bcd2303f23a09cf1744b439c423ef197027365fc8611cc8f06f
+    Port:           80/TCP
+    Host Port:      0/TCP
+    State:          Running
+      Started:      Tue, 09 Jun 2026 11:28:58 +0530
+    Ready:          True
+    Restart Count:  0
+    Environment:    <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-28g76 (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True 
+  Initialized                 True 
+  Ready                       True 
+  ContainersReady             True 
+  PodScheduled                True 
+Volumes:
+  kube-api-access-28g76:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    Optional:                false
+    DownwardAPI:             true
+QoS Class:                   BestEffort
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type    Reason     Age    From               Message
+  ----    ------     ----   ----               -------
+  Normal  Scheduled  2m10s  default-scheduler  Successfully assigned default/expo-web-deployment-7fccd998fd-8f6lb to desktop-control-plane
+  Normal  Pulling    2m9s   kubelet            Pulling image "sujeymcw/expo-web-app:local-20260609-112657"
+  Normal  Pulled     2m9s   kubelet            Successfully pulled image "sujeymcw/expo-web-app:local-20260609-112657" in 282ms (282ms including waiting). Image size: 26156653 bytes.
+  Normal  Created    2m8s   kubelet            Created container: expo-web-container
+  Normal  Started    2m8s   kubelet            Started container expo-web-container
 
 # ============================================================
 # NODE CPU AND MEMORY METRICS
 # ============================================================
 
-NAME       CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
-minikube   186m         1%       731Mi           10%         
+Node metrics capture failed. Capturing fallback node details.
+NAME                    STATUS   ROLES           AGE    VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION                      CONTAINER-RUNTIME
+desktop-control-plane   Ready    control-plane   4d1h   v1.34.3   172.18.0.3    <none>        Debian GNU/Linux 12 (bookworm)   6.6.114.1-microsoft-standard-WSL2   containerd://2.2.0
+Name:               desktop-control-plane
+Roles:              control-plane
+Labels:             beta.kubernetes.io/arch=amd64
+                    beta.kubernetes.io/os=linux
+                    kubernetes.io/arch=amd64
+                    kubernetes.io/hostname=desktop-control-plane
+                    kubernetes.io/os=linux
+                    node-role.kubernetes.io/control-plane=
+Annotations:        node.alpha.kubernetes.io/ttl: 0
+                    volumes.kubernetes.io/controller-managed-attach-detach: true
+CreationTimestamp:  Fri, 05 Jun 2026 09:31:51 +0530
+Taints:             <none>
+Unschedulable:      false
+Lease:
+  HolderIdentity:  desktop-control-plane
+  AcquireTime:     <unset>
+  RenewTime:       Tue, 09 Jun 2026 11:31:02 +0530
+Conditions:
+  Type             Status  LastHeartbeatTime                 LastTransitionTime                Reason                       Message
+  ----             ------  -----------------                 ------------------                ------                       -------
+  MemoryPressure   False   Tue, 09 Jun 2026 11:31:03 +0530   Fri, 05 Jun 2026 09:31:51 +0530   KubeletHasSufficientMemory   kubelet has sufficient memory available
+  DiskPressure     False   Tue, 09 Jun 2026 11:31:03 +0530   Fri, 05 Jun 2026 09:31:51 +0530   KubeletHasNoDiskPressure     kubelet has no disk pressure
+  PIDPressure      False   Tue, 09 Jun 2026 11:31:03 +0530   Fri, 05 Jun 2026 09:31:51 +0530   KubeletHasSufficientPID      kubelet has sufficient PID available
+  Ready            True    Tue, 09 Jun 2026 11:31:03 +0530   Fri, 05 Jun 2026 09:32:17 +0530   KubeletReady                 kubelet is posting ready status
+Addresses:
+  InternalIP:  172.18.0.3
+  Hostname:    desktop-control-plane
+Capacity:
+  cpu:                16
+  ephemeral-storage:  1055762868Ki
+  hugepages-1Gi:      0
+  hugepages-2Mi:      0
+  memory:             7014480Ki
+  pods:               110
+Allocatable:
+  cpu:                16
+  ephemeral-storage:  1055762868Ki
+  hugepages-1Gi:      0
+  hugepages-2Mi:      0
+  memory:             7014480Ki
+  pods:               110
+System Info:
+  Machine ID:                 c41958d3dacc4b359d39397bddafcca0
+  System UUID:                c41958d3dacc4b359d39397bddafcca0
+  Boot ID:                    babbb381-46ab-4c94-92a8-90c5bdda98bf
+  Kernel Version:             6.6.114.1-microsoft-standard-WSL2
+  OS Image:                   Debian GNU/Linux 12 (bookworm)
+  Operating System:           linux
+  Architecture:               amd64
+  Container Runtime Version:  containerd://2.2.0
+  Kubelet Version:            v1.34.3
+  Kube-Proxy Version:         
+PodCIDR:                      10.244.0.0/24
+PodCIDRs:                     10.244.0.0/24
+ProviderID:                   kind://docker/desktop/desktop-control-plane
+Non-terminated Pods:          (10 in total)
+  Namespace                   Name                                             CPU Requests  CPU Limits  Memory Requests  Memory Limits  Age
+  ---------                   ----                                             ------------  ----------  ---------------  -------------  ---
+  default                     expo-web-deployment-7fccd998fd-8f6lb             0 (0%)        0 (0%)      0 (0%)           0 (0%)         2m11s
+  kube-system                 coredns-66bc5c9577-jg8md                         100m (0%)     0 (0%)      70Mi (1%)        170Mi (2%)     4d1h
+  kube-system                 coredns-66bc5c9577-nfv8k                         100m (0%)     0 (0%)      70Mi (1%)        170Mi (2%)     4d1h
+  kube-system                 etcd-desktop-control-plane                       100m (0%)     0 (0%)      100Mi (1%)       0 (0%)         4m9s
+  kube-system                 kindnet-kzns2                                    100m (0%)     100m (0%)   50Mi (0%)        50Mi (0%)      4d1h
+  kube-system                 kube-apiserver-desktop-control-plane             250m (1%)     0 (0%)      0 (0%)           0 (0%)         4m9s
+  kube-system                 kube-controller-manager-desktop-control-plane    200m (1%)     0 (0%)      0 (0%)           0 (0%)         4d1h
+  kube-system                 kube-proxy-g499z                                 0 (0%)        0 (0%)      0 (0%)           0 (0%)         4d1h
+  kube-system                 kube-scheduler-desktop-control-plane             100m (0%)     0 (0%)      0 (0%)           0 (0%)         4d1h
+  local-path-storage          local-path-provisioner-5c4cdb564f-lwclj          0 (0%)        0 (0%)      0 (0%)           0 (0%)         4d1h
+Allocated resources:
+  (Total limits may be over 100 percent, i.e., overcommitted.)
+  Resource           Requests    Limits
+  --------           --------    ------
+  cpu                950m (5%)   100m (0%)
+  memory             290Mi (4%)  390Mi (5%)
+  ephemeral-storage  0 (0%)      0 (0%)
+  hugepages-1Gi      0 (0%)      0 (0%)
+  hugepages-2Mi      0 (0%)      0 (0%)
+Events:
+  Type     Reason                   Age                    From             Message
+  ----     ------                   ----                   ----             -------
+  Normal   Starting                 4m4s                   kube-proxy       
+  Normal   Starting                 4m17s                  kubelet          Starting kubelet.
+  Normal   NodeHasSufficientMemory  4m17s (x8 over 4m17s)  kubelet          Node desktop-control-plane status is now: NodeHasSufficientMemory
+  Normal   NodeHasNoDiskPressure    4m17s (x8 over 4m17s)  kubelet          Node desktop-control-plane status is now: NodeHasNoDiskPressure
+  Normal   NodeHasSufficientPID     4m17s (x7 over 4m17s)  kubelet          Node desktop-control-plane status is now: NodeHasSufficientPID
+  Normal   NodeAllocatableEnforced  4m17s                  kubelet          Updated Node Allocatable limit across pods
+  Warning  Rebooted                 4m9s                   kubelet          Node desktop-control-plane has been rebooted, boot id: babbb381-46ab-4c94-92a8-90c5bdda98bf
+  Normal   RegisteredNode           3m47s                  node-controller  Node desktop-control-plane event: Registered Node desktop-control-plane in Controller
 
 # ============================================================
 # METRICS STATUS

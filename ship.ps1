@@ -1,7 +1,7 @@
 # ============================================================
 # Git Push -> Docker Build -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
 # Full DevOps CICD Script with Backend + Expo Auto Launch + Clean Helm Output + Outlook Mail
-# Optimized + Metrics Server Retry Fix
+# Optimized + Metrics Server Removed For Faster Execution
 # ============================================================
 
 $ErrorActionPreference = "Stop"
@@ -87,117 +87,39 @@ function Invoke-SafeCommandToFile {
     }
 }
 
-function Enable-MetricsServerIfPossible {
-    Write-Output "Checking Metrics Server..."
-
-    try {
-        kubectl get deployment metrics-server -n kube-system 1>$null 2>$null
-
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "Metrics Server deployment already exists." -ForegroundColor Green
-            return
-        }
-    } catch {}
-
-    if (Test-CommandExists "minikube") {
-        Write-Host "Metrics Server not found. Enabling Minikube metrics-server addon..." -ForegroundColor Yellow
-
-        try {
-            minikube addons enable metrics-server
-        } catch {
-            Write-Host "Minikube metrics-server addon enable failed: $_" -ForegroundColor Yellow
-        }
-    } else {
-        Write-Host "Minikube not detected. Metrics Server auto-enable skipped for non-Minikube cluster." -ForegroundColor Yellow
-    }
-}
-
-function Wait-ForMetricsServer {
-    param (
-        [int]$MaxAttempts = 20,
-        [int]$SleepSeconds = 6
-    )
-
-    Write-Output "Waiting for Metrics Server API to become available..."
-
-    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-        try {
-            $metricsCheck = kubectl top nodes 2>&1
-
-            if ($LASTEXITCODE -eq 0 -and $metricsCheck -and ($metricsCheck -notmatch "metrics not available yet") -and ($metricsCheck -notmatch "Metrics API not available")) {
-                Write-Host "Metrics Server is ready." -ForegroundColor Green
-                return $true
-            }
-
-            Write-Host "Metrics not ready yet. Attempt $attempt of $MaxAttempts..." -ForegroundColor Yellow
-            Start-Sleep -Seconds $SleepSeconds
-        } catch {
-            Write-Host "Metrics check attempt $attempt failed. Retrying..." -ForegroundColor Yellow
-            Start-Sleep -Seconds $SleepSeconds
-        }
-    }
-
-    Write-Host "Metrics Server is installed but metrics are still warming up." -ForegroundColor Yellow
-    return $false
-}
-
 function Write-MetricsToFile {
     param (
         [string]$OutputFile,
         [string]$Namespace
     )
 
-    Enable-MetricsServerIfPossible
-    $metricsReady = Wait-ForMetricsServer -MaxAttempts 20 -SleepSeconds 6
+    Add-SectionToFile -Title "POD STATUS SNAPSHOT" -OutputFile $OutputFile
 
-    Add-SectionToFile -Title "POD CPU AND MEMORY METRICS" -OutputFile $OutputFile
+    "Live CPU/Memory metrics skipped intentionally to reduce pipeline execution time." | Out-File $OutputFile -Append -Encoding UTF8
+    "Metrics Server auto-enable and warm-up retry loop removed." | Out-File $OutputFile -Append -Encoding UTF8
+    "Use this manual command later only if metrics are needed: minikube addons enable metrics-server" | Out-File $OutputFile -Append -Encoding UTF8
+    "" | Out-File $OutputFile -Append -Encoding UTF8
 
-    if ($metricsReady) {
-        try {
-            $podMetrics = kubectl top pods --namespace $Namespace 2>&1
-
-            if ($LASTEXITCODE -eq 0) {
-                $podMetrics | Out-File $OutputFile -Append -Encoding UTF8
-            } else {
-                "kubectl top pods failed after retry. Capturing pod resource fallback." | Out-File $OutputFile -Append -Encoding UTF8
-                kubectl get pods --namespace $Namespace -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-                kubectl describe pods --namespace $Namespace 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-            }
-        } catch {
-            "Pod metrics capture failed. Capturing fallback pod details." | Out-File $OutputFile -Append -Encoding UTF8
-            kubectl get pods --namespace $Namespace -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-            kubectl describe pods --namespace $Namespace 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-        }
-    } else {
-        "Metrics Server is active but Kubernetes has not produced metrics yet." | Out-File $OutputFile -Append -Encoding UTF8
-        "Fallback captured below: pod status, requests, limits, and node allocation details." | Out-File $OutputFile -Append -Encoding UTF8
+    try {
         kubectl get pods --namespace $Namespace -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-        kubectl describe pods --namespace $Namespace 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
+    } catch {
+        "Pod status capture failed: $_" | Out-File $OutputFile -Append -Encoding UTF8
     }
 
-    Add-SectionToFile -Title "NODE CPU AND MEMORY METRICS" -OutputFile $OutputFile
+    Add-SectionToFile -Title "NODE STATUS SNAPSHOT" -OutputFile $OutputFile
 
-    if ($metricsReady) {
-        try {
-            $nodeMetrics = kubectl top nodes 2>&1
-
-            if ($LASTEXITCODE -eq 0) {
-                $nodeMetrics | Out-File $OutputFile -Append -Encoding UTF8
-            } else {
-                "kubectl top nodes failed after retry. Capturing node fallback." | Out-File $OutputFile -Append -Encoding UTF8
-                kubectl get nodes -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-                kubectl describe nodes 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-            }
-        } catch {
-            "Node metrics capture failed. Capturing fallback node details." | Out-File $OutputFile -Append -Encoding UTF8
-            kubectl get nodes -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-            kubectl describe nodes 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-        }
-    } else {
-        "Metrics Server is active but node metrics are not ready yet." | Out-File $OutputFile -Append -Encoding UTF8
-        "Fallback captured below: node status and allocation details." | Out-File $OutputFile -Append -Encoding UTF8
+    try {
         kubectl get nodes -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-        kubectl describe nodes 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
+    } catch {
+        "Node status capture failed: $_" | Out-File $OutputFile -Append -Encoding UTF8
+    }
+
+    Add-SectionToFile -Title "RESOURCE REQUESTS AND LIMITS SNAPSHOT" -OutputFile $OutputFile
+
+    try {
+        kubectl describe pods --namespace $Namespace 2>&1 | Select-String -Pattern "Name:|Namespace:|Node:|Status:|Requests:|Limits:|cpu:|memory:" | Out-File $OutputFile -Append -Encoding UTF8
+    } catch {
+        "Resource snapshot capture failed: $_" | Out-File $OutputFile -Append -Encoding UTF8
     }
 
 @"
@@ -205,9 +127,11 @@ function Write-MetricsToFile {
 # ============================================================
 # METRICS STATUS
 # ============================================================
-# Metrics Server Checked : Yes
-# Metrics Capture Mode   : kubectl top with retry
-# Fallback Mode          : kubectl describe pods/nodes if live metrics are warming up
+# Metrics Server Checked : No
+# Metrics Capture Mode   : Skipped for faster pipeline execution
+# Reason                 : Metrics Server warm-up delays CICD completion
+# Manual Enable Command  : minikube addons enable metrics-server
+# Manual Check Command   : kubectl top pods --namespace $Namespace
 # ============================================================
 
 "@ | Out-File $OutputFile -Append -Encoding UTF8
