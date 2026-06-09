@@ -1,6 +1,6 @@
 # ============================================================
 # Git Push -> Docker Build -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
-# Full DevOps CICD Script with Backend + Expo Auto Launch + Clean Helm Output + Outlook Mail
+# Full DevOps CICD Script with Backend + Metrics Monitor + Clean Helm Output + Outlook Mail
 # ============================================================
 
 $ErrorActionPreference = "Stop"
@@ -148,7 +148,7 @@ Please find the attached Helm deployment output report for review.
 <td>$PodCount</td>
 </tr>
 <tr>
-<td><b>Expo Frontend Port</b></td>
+<td><b>Expo Frontend</b></td>
 <td>$ExpoPort</td>
 </tr>
 <tr>
@@ -273,18 +273,22 @@ function Send-SlackFailure {
 function Ensure-MetricsServerReady {
     param (
         [string]$NamespaceName = "kube-system",
-        [int]$WaitSeconds = 120
+        [int]$WaitSeconds = 30
     )
 
-    Write-Output "Checking Kubernetes Metrics Server..."
+    Write-Output "Checking Kubernetes Metrics Server availability..."
 
     try {
+        if (Test-MetricsApiReady) {
+            Write-Host "Metrics Server is ready." -ForegroundColor Green
+            return $true
+        }
+
         $metricsDeployment = kubectl get deployment metrics-server -n $NamespaceName 2>$null
 
         if ($LASTEXITCODE -ne 0 -or -not $metricsDeployment) {
-            Write-Host "Metrics Server not found. Enabling Minikube metrics-server addon..." -ForegroundColor Yellow
-            minikube addons enable metrics-server | Out-Null
-            Start-Sleep -Seconds 5
+            Write-Host "Metrics Server not found. Metrics monitor terminal will enable it." -ForegroundColor Yellow
+            return $false
         }
 
         $currentArgs = kubectl get deployment metrics-server -n $NamespaceName -o jsonpath="{.spec.template.spec.containers[0].args}" 2>$null
@@ -296,16 +300,13 @@ function Ensure-MetricsServerReady {
         }
 
         kubectl rollout status deployment/metrics-server -n $NamespaceName --timeout=${WaitSeconds}s | Out-Null
-        Start-Sleep -Seconds 20
 
-        kubectl top nodes 1>$null 2>$null
-
-        if ($LASTEXITCODE -eq 0) {
+        if (Test-MetricsApiReady) {
             Write-Host "Metrics Server is ready." -ForegroundColor Green
             return $true
         }
 
-        Write-Host "Metrics Server exists, but metrics API is still warming up." -ForegroundColor Yellow
+        Write-Host "Metrics Server is active, but metrics API is still warming up." -ForegroundColor Yellow
         return $false
     } catch {
         Write-Host "Metrics Server check failed: $_" -ForegroundColor Yellow
@@ -359,6 +360,94 @@ function Invoke-MetricsCommandToFile {
     }
 
     return "Not available"
+}
+
+
+function Start-MetricsServerMonitor {
+    Write-Output "Launching Metrics Server monitor in separate PowerShell terminal..."
+
+    Start-Process powershell.exe -ArgumentList @(
+        "-NoExit",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+@"
+`$ErrorActionPreference = 'Continue'
+Clear-Host
+Write-Host '============================================================' -ForegroundColor Cyan
+Write-Host 'KUBERNETES METRICS SERVER MONITOR' -ForegroundColor Cyan
+Write-Host '============================================================' -ForegroundColor Cyan
+Write-Host ''
+
+Write-Host 'Step 1: Enabling Minikube metrics-server addon...' -ForegroundColor Yellow
+minikube addons enable metrics-server
+
+Write-Host ''
+Write-Host 'Step 2: Applying Minikube/Docker TLS compatibility patch...' -ForegroundColor Yellow
+
+`$argsText = kubectl get deployment metrics-server -n kube-system -o jsonpath='{.spec.template.spec.containers[0].args}' 2>`$null
+
+if (`$argsText -notmatch '--kubelet-insecure-tls') {
+    kubectl patch deployment metrics-server -n kube-system --type='json' -p='[
+      {
+        "op": "add",
+        "path": "/spec/template/spec/containers/0/args/-",
+        "value": "--kubelet-insecure-tls"
+      }
+    ]'
+    kubectl rollout restart deployment metrics-server -n kube-system
+} else {
+    Write-Host 'TLS patch already present. Skipping patch.' -ForegroundColor Green
+}
+
+Write-Host ''
+Write-Host 'Step 3: Waiting for metrics-server pod rollout...' -ForegroundColor Yellow
+kubectl rollout status deployment/metrics-server -n kube-system --timeout=180s
+
+Write-Host ''
+Write-Host 'Step 4: Waiting until kubectl top becomes available...' -ForegroundColor Yellow
+
+do {
+    Start-Sleep -Seconds 5
+    kubectl top nodes 1>`$null 2>`$null
+    if (`$LASTEXITCODE -ne 0) {
+        Write-Host 'Metrics API warming up...' -ForegroundColor DarkYellow
+    }
+} until (`$LASTEXITCODE -eq 0)
+
+Write-Host ''
+Write-Host 'METRICS SERVER IS ACTIVE AND AVAILABLE' -ForegroundColor Green
+Start-Sleep -Seconds 2
+
+while (`$true) {
+    Clear-Host
+    Write-Host '============================================================' -ForegroundColor Green
+    Write-Host 'LIVE NODE CPU AND MEMORY METRICS' -ForegroundColor Green
+    Write-Host '============================================================' -ForegroundColor Green
+    kubectl top nodes
+
+    Write-Host ''
+    Write-Host '============================================================' -ForegroundColor Green
+    Write-Host 'LIVE POD CPU AND MEMORY METRICS' -ForegroundColor Green
+    Write-Host '============================================================' -ForegroundColor Green
+    kubectl top pods -A
+
+    Write-Host ''
+    Write-Host 'Refreshing every 10 seconds. Keep this terminal open.' -ForegroundColor Cyan
+    Start-Sleep -Seconds 10
+}
+"@
+    )
+}
+
+function Test-MetricsApiReady {
+    kubectl top nodes 1>$null 2>$null
+
+    if ($LASTEXITCODE -eq 0) {
+        return $true
+    }
+
+    return $false
 }
 
 function Write-HelmChartOutput {
@@ -457,7 +546,11 @@ function Write-HelmChartOutput {
 
 Invoke-RequiredCommandCheck
 
-$expoPort = Get-FreeExpoPort
+$env:DOCKER_BUILDKIT = "1"
+$env:COMPOSE_DOCKER_CLI_BUILD = "1"
+$expoPort = "Manual start only - Expo auto-launch removed"
+
+Start-MetricsServerMonitor
 
 Write-Output ""
 Write-Output "PERFORMING HARD SCRUB ON PORT 8000 AND LAUNCHING BACKEND..."
@@ -503,12 +596,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Output ""
-Write-Output "STAGE 2: Building Docker image..."
+Write-Output "STAGE 2: Building Docker image using BuildKit cache..."
 
 docker build `
     -f ./Dockerfile `
     -t "${dockerImage}:$buildTag" `
     --pull=false `
+    --progress=plain `
     .
 
 if ($LASTEXITCODE -ne 0) {
@@ -559,13 +653,10 @@ Write-Output "STAGE 5: Creating one proper Helm chart output file..."
 Write-HelmChartOutput -ImageName $dockerImage -ImageTag $buildTag
 
 Write-Output ""
-Write-Output "LAUNCHING EXPO MOBILE FRONTEND INTERFACE IN SEPARATE POWERSHELL..."
-
-Start-Process powershell.exe -ArgumentList @(
-    "-NoExit",
-    "-Command",
-    "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO FRONTEND INTERFACE ON PORT $expoPort...' -ForegroundColor Blue; npx expo start -w --port $expoPort --non-interactive"
-)
+Write-Output "EXPO FRONTEND AUTO-LAUNCH REMOVED TO REDUCE PIPELINE TIME."
+Write-Output "Run Expo manually when needed:"
+Write-Output "cd src"
+Write-Output "npx expo start -w"
 
 $runningPods = kubectl get pods --namespace $namespace --no-headers 2>$null | Select-String "Running"
 $podCount = @($runningPods).Count
@@ -582,7 +673,7 @@ $textPayload = "*=== KUBERNETES DEPLOYMENT ROLLOUT SUCCESSFUL ===*" + "`n`n" +
                "*Docker Image:* " + "${dockerImage}:$buildTag" + "`n" +
                "*Running Pods:* " + $podCount + "`n" +
                "*Helm Output File:* " + $helmChartOutputFile + "`n" +
-               "*Expo Frontend Port:* " + $expoPort + "`n" +
+               "*Expo Frontend:* Manual start only - Expo auto-launch removed" + "`n" +
                "*Total Time:* " + $executionDuration + " seconds" + "`n" +
                "*Workflow:* Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment" + "`n" +
                "_Telemetry Sync Complete: " + $timestamp + "_"
@@ -618,6 +709,6 @@ Write-Output "Helm Release: $helmRelease"
 Write-Output "Namespace: $namespace"
 Write-Output "Single Helm Output File: $helmChartOutputFile"
 Write-Output "Outlook Mail Sent To: $outlookTo"
-Write-Output "Expo Frontend Port: $expoPort"
+Write-Output "Expo Frontend: $expoPort"
 Write-Output "Total Time: $executionDuration seconds"
 Write-Output "--------------------------------------------------"
