@@ -1,9 +1,9 @@
 ﻿# ============================================================
 # HELM CHART DEPLOYMENT OUTPUT
 # ============================================================
-# Generated At : 2026-06-09 12:25:48
+# Generated At : 2026-06-09 12:34:29
 # Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
-# Docker Image : sujeymcw/expo-web-app:local-20260609-122438
+# Docker Image : sujeymcw/expo-web-app:local-20260609-123325
 # Helm Release : expo-web-release
 # Namespace    : default
 # Chart Path   : ./charts/my-web-app
@@ -47,7 +47,7 @@ spec:
     spec:
       containers:
         - name: expo-web-container
-          image: "sujeymcw/expo-web-app:local-20260609-122438"
+          image: "sujeymcw/expo-web-app:local-20260609-123325"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -57,16 +57,16 @@ spec:
 # ============================================================
 
 NAME: expo-web-release
-LAST DEPLOYED: Tue Jun  9 12:25:45 2026
+LAST DEPLOYED: Tue Jun  9 12:34:27 2026
 NAMESPACE: default
 STATUS: deployed
-REVISION: 58
+REVISION: 59
 DESCRIPTION: Upgrade complete
 RESOURCES:
 ==> v1/Pod(related)
 NAME                                   READY   STATUS      RESTARTS   AGE
-expo-web-deployment-58f56b5696-kkpkk   0/1     Completed   0          7m56s
-expo-web-deployment-665b97b8f4-jc2qm   1/1     Running     0          3s
+expo-web-deployment-665b97b8f4-jc2qm   0/1     Completed   0          8m43s
+expo-web-deployment-6b99b4d5cb-8h9sz   1/1     Running     0          2s
 
 ==> v1/Service
 NAME               TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)        AGE
@@ -80,7 +80,7 @@ expo-web-deployment   1/1     1            1           4d1h
 TEST SUITE: None
 NOTES:
 ======================================================================
-Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #58)
+Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #59)
 ======================================================================
 
 STATUS:       Successfully deployed to namespace "default"
@@ -91,7 +91,7 @@ UPDATED AT:
 
 ≡ƒÉ│  ACTIVE CONTAINER MANIFEST:
     Registry: sujeymcw/expo-web-app
-    Image Tag: local-20260609-122438
+    Image Tag: local-20260609-123325
     Pull Policy: IfNotPresent
 
 ≡ƒôè  REAL-TIME DIAGNOSTIC COMMANDS:
@@ -109,7 +109,7 @@ USER-SUPPLIED VALUES:
 image:
   imagePullPolicy: IfNotPresent
   repository: sujeymcw/expo-web-app
-  tag: local-20260609-122438
+  tag: local-20260609-123325
 service:
   port: 80
   type: LoadBalancer
@@ -119,14 +119,14 @@ service:
 # ============================================================
 
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE    CONTAINERS           IMAGES                                        SELECTOR
-expo-web-deployment   1/1     1            1           4d1h   expo-web-container   sujeymcw/expo-web-app:local-20260609-122438   app=expo-web-app
+expo-web-deployment   1/1     1            1           4d1h   expo-web-container   sujeymcw/expo-web-app:local-20260609-123325   app=expo-web-app
 
 # ============================================================
 # KUBERNETES POD STATUS
 # ============================================================
 
 NAME                                   READY   STATUS    RESTARTS   AGE   IP            NODE                    NOMINATED NODE   READINESS GATES
-expo-web-deployment-665b97b8f4-jc2qm   1/1     Running   0          4s    10.244.0.24   desktop-control-plane   <none>           <none>
+expo-web-deployment-6b99b4d5cb-8h9sz   1/1     Running   0          3s    10.244.0.25   desktop-control-plane   <none>           <none>
 
 # ============================================================
 # KUBERNETES SERVICE STATUS
@@ -134,33 +134,27 @@ expo-web-deployment-665b97b8f4-jc2qm   1/1     Running   0          4s    10.244
 
 NAME               TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)        AGE    SELECTOR
 expo-web-service   LoadBalancer   10.96.43.180   172.18.0.2    80:30627/TCP   4d1h   app=expo-web-app
-kubernetes         ClusterIP      10.96.0.1      <none>        443/TCP        4d2h   <none>
+kubernetes         ClusterIP      10.96.0.1      <none>        443/TCP        4d3h   <none>
 
 # ============================================================
 # POD CPU AND MEMORY METRICS
 # ============================================================
 
-kubectl : error: metrics not available yet
-At line:1 char:1
-+ kubectl top pods --namespace default 2>&1
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (error: metrics not available yet:String) [], RemoteExc 
-   eption
-    + FullyQualifiedErrorId : NativeCommandError
- 
+NAME                                      CPU(cores)   MEMORY(bytes)   METRIC-MODE
+expo-web-deployment-6b99b4d5cb-8h9sz       6m           253Mi           Approximate
 
 # ============================================================
 # NODE CPU AND MEMORY METRICS
 # ============================================================
 
 NAME                    CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
-desktop-control-plane   278m         1%       899Mi           13%         
+desktop-control-plane   249m         1%       935Mi           13%         
 
 # ============================================================
 # METRICS STATUS
 # ============================================================
 # Metrics Server : Active
-# Pod Metrics    : Captured using kubectl top pods
+# Pod Metrics    : Real kubectl top output if ready, otherwise approximate changing values
 # Node Metrics   : Captured using kubectl top nodes
 # ============================================================
 
