@@ -1,9 +1,9 @@
 ﻿# ============================================================
 # HELM CHART DEPLOYMENT OUTPUT
 # ============================================================
-# Generated At : 2026-06-09 11:48:17
+# Generated At : 2026-06-09 11:56:38
 # Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
-# Docker Image : sujeymcw/expo-web-app:local-20260609-114652
+# Docker Image : sujeymcw/expo-web-app:local-20260609-115511
 # Helm Release : expo-web-release
 # Namespace    : default
 # Chart Path   : ./charts/my-web-app
@@ -47,7 +47,7 @@ spec:
     spec:
       containers:
         - name: expo-web-container
-          image: "sujeymcw/expo-web-app:local-20260609-114652"
+          image: "sujeymcw/expo-web-app:local-20260609-115511"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -57,10 +57,10 @@ spec:
 # ============================================================
 
 NAME: expo-web-release
-LAST DEPLOYED: Tue Jun  9 11:48:14 2026
+LAST DEPLOYED: Tue Jun  9 11:56:36 2026
 NAMESPACE: default
 STATUS: deployed
-REVISION: 55
+REVISION: 56
 DESCRIPTION: Upgrade complete
 RESOURCES:
 ==> v1/Service
@@ -72,14 +72,14 @@ NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
 expo-web-deployment   1/1     1            1           4d
 
 ==> v1/Pod(related)
-NAME                                  READY   STATUS    RESTARTS   AGE
-expo-web-deployment-6c7557fd9-ptvf4   1/1     Running   0          3s
+NAME                                   READY   STATUS    RESTARTS   AGE
+expo-web-deployment-64754b768b-4vcsh   1/1     Running   0          4s
 
 
 TEST SUITE: None
 NOTES:
 ======================================================================
-Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #55)
+Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #56)
 ======================================================================
 
 STATUS:       Successfully deployed to namespace "default"
@@ -90,7 +90,7 @@ UPDATED AT:
 
 ≡ƒÉ│  ACTIVE CONTAINER MANIFEST:
     Registry: sujeymcw/expo-web-app
-    Image Tag: local-20260609-114652
+    Image Tag: local-20260609-115511
     Pull Policy: IfNotPresent
 
 ≡ƒôè  REAL-TIME DIAGNOSTIC COMMANDS:
@@ -108,7 +108,7 @@ USER-SUPPLIED VALUES:
 image:
   imagePullPolicy: IfNotPresent
   repository: sujeymcw/expo-web-app
-  tag: local-20260609-114652
+  tag: local-20260609-115511
 service:
   port: 80
   type: LoadBalancer
@@ -118,14 +118,14 @@ service:
 # ============================================================
 
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS           IMAGES                                        SELECTOR
-expo-web-deployment   1/1     1            1           4d    expo-web-container   sujeymcw/expo-web-app:local-20260609-114652   app=expo-web-app
+expo-web-deployment   1/1     1            1           4d    expo-web-container   sujeymcw/expo-web-app:local-20260609-115511   app=expo-web-app
 
 # ============================================================
 # KUBERNETES POD STATUS
 # ============================================================
 
-NAME                                  READY   STATUS    RESTARTS   AGE   IP           NODE                    NOMINATED NODE   READINESS GATES
-expo-web-deployment-6c7557fd9-ptvf4   1/1     Running   0          5s    10.244.0.9   desktop-control-plane   <none>           <none>
+NAME                                   READY   STATUS    RESTARTS   AGE   IP            NODE                    NOMINATED NODE   READINESS GATES
+expo-web-deployment-64754b768b-4vcsh   1/1     Running   0          6s    10.244.0.10   desktop-control-plane   <none>           <none>
 
 # ============================================================
 # KUBERNETES SERVICE STATUS
@@ -152,8 +152,8 @@ At line:1 char:1
  
 
 Fallback output:
-NAME                                  READY   STATUS    RESTARTS   AGE   IP           NODE                    NOMINATED NODE   READINESS GATES
-expo-web-deployment-6c7557fd9-ptvf4   1/1     Running   0          8s    10.244.0.9   desktop-control-plane   <none>           <none>
+NAME                                   READY   STATUS    RESTARTS   AGE   IP            NODE                    NOMINATED NODE   READINESS GATES
+expo-web-deployment-64754b768b-4vcsh   1/1     Running   0          8s    10.244.0.10   desktop-control-plane   <none>           <none>
 
 # ============================================================
 # NODE CPU AND MEMORY METRICS
@@ -172,14 +172,3 @@ At line:1 char:1
  
 
 Fallback output:
-NAME                    STATUS   ROLES           AGE    VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION                      CONTAINER-RUNTIME
-desktop-control-plane   Ready    control-plane   4d2h   v1.34.3   172.18.0.3    <none>        Debian GNU/Linux 12 (bookworm)   6.6.114.1-microsoft-standard-WSL2   containerd://2.2.0
-
-# ============================================================
-# METRICS STATUS
-# ============================================================
-# Metrics Server : Active but metrics not ready yet
-# Pod Metrics    : Not available
-# Node Metrics   : Not available
-# ============================================================
-
