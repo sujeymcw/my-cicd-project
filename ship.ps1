@@ -1,11 +1,9 @@
 # ============================================================
 # Git Push -> Docker Build -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
 # Full DevOps CICD Script with Backend + Expo Auto Launch + Clean Helm Output + Outlook Mail
-# Optimized + Metrics Server Removed For Faster Execution
 # ============================================================
 
 $ErrorActionPreference = "Stop"
-$env:DOCKER_BUILDKIT = "1"
 
 $pipelineStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $buildTag = "local-" + (Get-Date -Format "yyyyMMdd-HHmmss")
@@ -38,20 +36,10 @@ function Test-CommandExists {
     return $null -ne $command
 }
 
-function Invoke-RequiredCommandCheck {
-    $requiredCommands = @("git", "docker", "kubectl", "helm")
-
-    foreach ($commandName in $requiredCommands) {
-        if (-not (Test-CommandExists $commandName)) {
-            Write-Error "$commandName is not installed or not available in PATH."
-            exit 1
-        }
-    }
-}
-
-function Add-SectionToFile {
+function Invoke-SafeCommandToFile {
     param (
         [string]$Title,
+        [string]$CommandText,
         [string]$OutputFile
     )
 
@@ -62,19 +50,9 @@ function Add-SectionToFile {
 # ============================================================
 
 "@ | Out-File $OutputFile -Append -Encoding UTF8
-}
-
-function Invoke-SafeCommandToFile {
-    param (
-        [string]$Title,
-        [string]$CommandText,
-        [string]$OutputFile
-    )
-
-    Add-SectionToFile -Title $Title -OutputFile $OutputFile
 
     try {
-        $commandOutput = Invoke-Expression "$CommandText 2>&1"
+        $commandOutput = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$CommandText 2>&1"
 
         if ($commandOutput) {
             $commandOutput | Out-File $OutputFile -Append -Encoding UTF8
@@ -87,54 +65,15 @@ function Invoke-SafeCommandToFile {
     }
 }
 
-function Write-MetricsToFile {
-    param (
-        [string]$OutputFile,
-        [string]$Namespace
-    )
+function Invoke-RequiredCommandCheck {
+    $requiredCommands = @("git", "docker", "kubectl", "helm")
 
-    Add-SectionToFile -Title "POD STATUS SNAPSHOT" -OutputFile $OutputFile
-
-    "Live CPU/Memory metrics skipped intentionally to reduce pipeline execution time." | Out-File $OutputFile -Append -Encoding UTF8
-    "Metrics Server auto-enable and warm-up retry loop removed." | Out-File $OutputFile -Append -Encoding UTF8
-    "Use this manual command later only if metrics are needed: minikube addons enable metrics-server" | Out-File $OutputFile -Append -Encoding UTF8
-    "" | Out-File $OutputFile -Append -Encoding UTF8
-
-    try {
-        kubectl get pods --namespace $Namespace -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-    } catch {
-        "Pod status capture failed: $_" | Out-File $OutputFile -Append -Encoding UTF8
+    foreach ($commandName in $requiredCommands) {
+        if (-not (Test-CommandExists $commandName)) {
+            Write-Error "$commandName is not installed or not available in PATH."
+            exit 1
+        }
     }
-
-    Add-SectionToFile -Title "NODE STATUS SNAPSHOT" -OutputFile $OutputFile
-
-    try {
-        kubectl get nodes -o wide 2>&1 | Out-File $OutputFile -Append -Encoding UTF8
-    } catch {
-        "Node status capture failed: $_" | Out-File $OutputFile -Append -Encoding UTF8
-    }
-
-    Add-SectionToFile -Title "RESOURCE REQUESTS AND LIMITS SNAPSHOT" -OutputFile $OutputFile
-
-    try {
-        kubectl describe pods --namespace $Namespace 2>&1 | Select-String -Pattern "Name:|Namespace:|Node:|Status:|Requests:|Limits:|cpu:|memory:" | Out-File $OutputFile -Append -Encoding UTF8
-    } catch {
-        "Resource snapshot capture failed: $_" | Out-File $OutputFile -Append -Encoding UTF8
-    }
-
-@"
-
-# ============================================================
-# METRICS STATUS
-# ============================================================
-# Metrics Server Checked : No
-# Metrics Capture Mode   : Skipped for faster pipeline execution
-# Reason                 : Metrics Server warm-up delays CICD completion
-# Manual Enable Command  : minikube addons enable metrics-server
-# Manual Check Command   : kubectl top pods --namespace $Namespace
-# ============================================================
-
-"@ | Out-File $OutputFile -Append -Encoding UTF8
 }
 
 function Send-OutlookDeploymentMail {
@@ -184,24 +123,55 @@ Please find the attached Helm deployment output report for review.
 <h3>Deployment Summary</h3>
 
 <table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse;">
-<tr><td><b>Status</b></td><td style="color:#107C10;"><b>$DeploymentStatus</b></td></tr>
-<tr><td><b>Docker Image</b></td><td>$DockerImage`:$ImageTag</td></tr>
-<tr><td><b>Helm Release</b></td><td>$HelmRelease</td></tr>
-<tr><td><b>Namespace</b></td><td>$Namespace</td></tr>
-<tr><td><b>Chart Path</b></td><td>$ChartPath</td></tr>
-<tr><td><b>Running Pods</b></td><td>$PodCount</td></tr>
-<tr><td><b>Expo Frontend Port</b></td><td>$ExpoPort</td></tr>
-<tr><td><b>Total Execution Time</b></td><td>$ExecutionDuration seconds</td></tr>
-<tr><td><b>Generated At</b></td><td>$generatedAt</td></tr>
+<tr>
+<td><b>Status</b></td>
+<td style="color:#107C10;"><b>$DeploymentStatus</b></td>
+</tr>
+<tr>
+<td><b>Docker Image</b></td>
+<td>$DockerImage`:$ImageTag</td>
+</tr>
+<tr>
+<td><b>Helm Release</b></td>
+<td>$HelmRelease</td>
+</tr>
+<tr>
+<td><b>Namespace</b></td>
+<td>$Namespace</td>
+</tr>
+<tr>
+<td><b>Chart Path</b></td>
+<td>$ChartPath</td>
+</tr>
+<tr>
+<td><b>Running Pods</b></td>
+<td>$PodCount</td>
+</tr>
+<tr>
+<td><b>Expo Frontend Port</b></td>
+<td>$ExpoPort</td>
+</tr>
+<tr>
+<td><b>Total Execution Time</b></td>
+<td>$ExecutionDuration seconds</td>
+</tr>
+<tr>
+<td><b>Generated At</b></td>
+<td>$generatedAt</td>
+</tr>
 </table>
 
 <h3>Pipeline Workflow</h3>
 
-<p>Git Push &rarr; Docker Build &rarr; Docker Push &rarr; Helm Upgrade &rarr; Kubernetes Deployment</p>
+<p>
+Git Push &rarr; Docker Build &rarr; Docker Push &rarr; Helm Upgrade &rarr; Kubernetes Deployment
+</p>
 
 <h3>Attachment</h3>
 
-<p>Attached File: <b>helm-chart-output.yaml</b></p>
+<p>
+Attached File: <b>helm-chart-output.yaml</b>
+</p>
 
 <br/>
 
@@ -256,7 +226,7 @@ function Clear-Port8000 {
             }
         }
 
-        Start-Sleep -Seconds 1
+        Start-Sleep -Seconds 2
         Write-Host "Port 8000 cleanup completed." -ForegroundColor Green
     } catch {
         Write-Host "Socket release sweep finished." -ForegroundColor Yellow
@@ -352,7 +322,27 @@ function Write-HelmChartOutput {
         -CommandText "kubectl get svc --namespace $namespace -o wide" `
         -OutputFile $helmChartOutputFile
 
-    Write-MetricsToFile -OutputFile $helmChartOutputFile -Namespace $namespace
+    Invoke-SafeCommandToFile `
+        -Title "POD CPU AND MEMORY METRICS" `
+        -CommandText "kubectl top pods --namespace $namespace" `
+        -OutputFile $helmChartOutputFile
+
+    Invoke-SafeCommandToFile `
+        -Title "NODE CPU AND MEMORY METRICS" `
+        -CommandText "kubectl top nodes" `
+        -OutputFile $helmChartOutputFile
+
+@"
+
+# ============================================================
+# METRICS STATUS
+# ============================================================
+# Metrics Server : Active
+# Pod Metrics    : Captured using kubectl top pods
+# Node Metrics   : Captured using kubectl top nodes
+# ============================================================
+
+"@ | Out-File $helmChartOutputFile -Append -Encoding UTF8
 
     Write-Output "Single Helm chart output file generated: $helmChartOutputFile"
 }
@@ -375,33 +365,8 @@ Start-Process powershell.exe -ArgumentList @(
     "Clear-Host; Set-Location '$PSScriptRoot'; Write-Host 'LAUNCHING CONTROL PLANE BACKEND BRIDGE ENGINE...' -ForegroundColor Cyan; python dashboard_backend.py"
 )
 
-Write-Output "Waiting for backend API server to bind cleanly to port 8000..."
-
-$backendReady = $false
-
-for ($i = 1; $i -le 15; $i++) {
-    try {
-        Invoke-WebRequest "http://127.0.0.1:8000" -TimeoutSec 1 | Out-Null
-        $backendReady = $true
-        Write-Host "Backend API server is ready." -ForegroundColor Green
-        break
-    } catch {
-        Start-Sleep -Milliseconds 500
-    }
-}
-
-if (-not $backendReady) {
-    Write-Host "Backend did not respond yet. Continuing pipeline because backend runs separately." -ForegroundColor Yellow
-}
-
-Write-Output ""
-Write-Output "LAUNCHING EXPO MOBILE FRONTEND INTERFACE IN SEPARATE POWERSHELL..."
-
-Start-Process powershell.exe -ArgumentList @(
-    "-NoExit",
-    "-Command",
-    "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO FRONTEND INTERFACE ON PORT $expoPort...' -ForegroundColor Blue; npx expo start -w --port $expoPort --non-interactive"
-)
+Write-Output "Waiting 5 seconds for backend API server to bind cleanly to port 8000..."
+Start-Sleep -Seconds 5
 
 Write-Output ""
 Write-Output "STARTING DEVOPS CICD PIPELINE..."
@@ -434,7 +399,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Output ""
-Write-Output "STAGE 2: Building Docker image with BuildKit optimization..."
+Write-Output "STAGE 2: Building Docker image..."
 
 docker build `
     -f ./Dockerfile `
@@ -478,20 +443,25 @@ if ($LASTEXITCODE -ne 0) {
 Write-Output ""
 Write-Output "Waiting for Kubernetes rollout..."
 
-kubectl wait `
-    --for=condition=available `
-    deployment/expo-web-deployment `
-    --namespace $namespace `
-    --timeout=90s
+kubectl rollout status deployment/expo-web-deployment --namespace $namespace --timeout=180s
 
 if ($LASTEXITCODE -ne 0) {
-    Send-SlackFailure "STAGE 4 - Kubernetes Rollout" "Deployment did not become available within timeout."
+    Send-SlackFailure "STAGE 4 - Kubernetes Rollout" "Deployment did not become ready within timeout."
 }
 
 Write-Output ""
 Write-Output "STAGE 5: Creating one proper Helm chart output file..."
 
 Write-HelmChartOutput -ImageName $dockerImage -ImageTag $buildTag
+
+Write-Output ""
+Write-Output "LAUNCHING EXPO MOBILE FRONTEND INTERFACE IN SEPARATE POWERSHELL..."
+
+Start-Process powershell.exe -ArgumentList @(
+    "-NoExit",
+    "-Command",
+    "Clear-Host; Set-Location '$PSScriptRoot\src'; Write-Host 'LAUNCHING EXPO FRONTEND INTERFACE ON PORT $expoPort...' -ForegroundColor Blue; npx expo start -w --port $expoPort --non-interactive"
+)
 
 $runningPods = kubectl get pods --namespace $namespace --no-headers 2>$null | Select-String "Running"
 $podCount = @($runningPods).Count
