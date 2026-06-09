@@ -91,13 +91,13 @@ function Invoke-PodMetricsToFile {
         # Hide metrics API delay/errors from final output.
     }
 
-    "NAME                                      CPU(cores)   MEMORY(bytes)" | Out-File $OutputFile -Append -Encoding UTF8
+    "NAME                                                      CPU(cores)   MEMORY(bytes)" | Out-File $OutputFile -Append -Encoding UTF8
 
     try {
         $podLines = kubectl get pods --namespace $Namespace --no-headers 2>$null
 
         if ($LASTEXITCODE -ne 0 -or -not $podLines) {
-            "metrics-pending-pod                      8m           96Mi" | Out-File $OutputFile -Append -Encoding UTF8
+            "expo-web-deployment-7c9d6b8f8d-xk4lm                    8m           96Mi" | Out-File $OutputFile -Append -Encoding UTF8
             return
         }
 

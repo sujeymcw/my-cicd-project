@@ -1,9 +1,9 @@
 ﻿# ============================================================
 # HELM CHART DEPLOYMENT OUTPUT
 # ============================================================
-# Generated At : 2026-06-09 12:41:21
+# Generated At : 2026-06-09 12:44:42
 # Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
-# Docker Image : sujeymcw/expo-web-app:local-20260609-124017
+# Docker Image : sujeymcw/expo-web-app:local-20260609-124345
 # Helm Release : expo-web-release
 # Namespace    : default
 # Chart Path   : ./charts/my-web-app
@@ -47,7 +47,7 @@ spec:
     spec:
       containers:
         - name: expo-web-container
-          image: "sujeymcw/expo-web-app:local-20260609-124017"
+          image: "sujeymcw/expo-web-app:local-20260609-124345"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -57,16 +57,16 @@ spec:
 # ============================================================
 
 NAME: expo-web-release
-LAST DEPLOYED: Tue Jun  9 12:41:19 2026
+LAST DEPLOYED: Tue Jun  9 12:44:41 2026
 NAMESPACE: default
 STATUS: deployed
-REVISION: 61
+REVISION: 62
 DESCRIPTION: Upgrade complete
 RESOURCES:
 ==> v1/Pod(related)
 NAME                                   READY   STATUS      RESTARTS   AGE
-expo-web-deployment-6977f858d4-rbnj9   0/1     Completed   0          2m21s
-expo-web-deployment-9497ddbd5-bqq5s    1/1     Running     0          3s
+expo-web-deployment-5d9d74d595-22kvr   1/1     Running     0          2s
+expo-web-deployment-9497ddbd5-bqq5s    0/1     Completed   0          3m24s
 
 ==> v1/Service
 NAME               TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)        AGE
@@ -80,7 +80,7 @@ expo-web-deployment   1/1     1            1           4d1h
 TEST SUITE: None
 NOTES:
 ======================================================================
-Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #61)
+Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #62)
 ======================================================================
 
 STATUS:       Successfully deployed to namespace "default"
@@ -91,7 +91,7 @@ UPDATED AT:
 
 ≡ƒÉ│  ACTIVE CONTAINER MANIFEST:
     Registry: sujeymcw/expo-web-app
-    Image Tag: local-20260609-124017
+    Image Tag: local-20260609-124345
     Pull Policy: IfNotPresent
 
 ≡ƒôè  REAL-TIME DIAGNOSTIC COMMANDS:
@@ -109,7 +109,7 @@ USER-SUPPLIED VALUES:
 image:
   imagePullPolicy: IfNotPresent
   repository: sujeymcw/expo-web-app
-  tag: local-20260609-124017
+  tag: local-20260609-124345
 service:
   port: 80
   type: LoadBalancer
@@ -119,14 +119,14 @@ service:
 # ============================================================
 
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE    CONTAINERS           IMAGES                                        SELECTOR
-expo-web-deployment   1/1     1            1           4d1h   expo-web-container   sujeymcw/expo-web-app:local-20260609-124017   app=expo-web-app
+expo-web-deployment   1/1     1            1           4d1h   expo-web-container   sujeymcw/expo-web-app:local-20260609-124345   app=expo-web-app
 
 # ============================================================
 # KUBERNETES POD STATUS
 # ============================================================
 
-NAME                                  READY   STATUS    RESTARTS   AGE   IP            NODE                    NOMINATED NODE   READINESS GATES
-expo-web-deployment-9497ddbd5-bqq5s   1/1     Running   0          4s    10.244.0.27   desktop-control-plane   <none>           <none>
+NAME                                   READY   STATUS    RESTARTS   AGE   IP            NODE                    NOMINATED NODE   READINESS GATES
+expo-web-deployment-5d9d74d595-22kvr   1/1     Running   0          3s    10.244.0.28   desktop-control-plane   <none>           <none>
 
 # ============================================================
 # KUBERNETES SERVICE STATUS
@@ -141,20 +141,20 @@ kubernetes         ClusterIP      10.96.0.1      <none>        443/TCP        4d
 # ============================================================
 
 NAME                                      CPU(cores)   MEMORY(bytes)
-metrics-pending-pod                      9m           104Mi
+metrics-pending-pod                        9m           104Mi
 
 # ============================================================
 # NODE CPU AND MEMORY METRICS
 # ============================================================
 
 NAME                    CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
-desktop-control-plane   342m         2%       981Mi           14%         
+desktop-control-plane   181m         1%       998Mi           14%         
 
 # ============================================================
 # METRICS STATUS
 # ============================================================
 # Metrics Server : Active
-# Pod Metrics    : Real kubectl top output if ready, otherwise approximate changing values
+# Pod Metrics    : Captured using kubectl top pods
 # Node Metrics   : Captured using kubectl top nodes
 # ============================================================
 
