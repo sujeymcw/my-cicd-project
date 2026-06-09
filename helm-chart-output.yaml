@@ -1,9 +1,9 @@
 ﻿# ============================================================
 # HELM CHART DEPLOYMENT OUTPUT
 # ============================================================
-# Generated At : 2026-06-09 12:44:42
+# Generated At : 2026-06-09 12:49:39
 # Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
-# Docker Image : sujeymcw/expo-web-app:local-20260609-124345
+# Docker Image : sujeymcw/expo-web-app:local-20260609-124823
 # Helm Release : expo-web-release
 # Namespace    : default
 # Chart Path   : ./charts/my-web-app
@@ -47,7 +47,7 @@ spec:
     spec:
       containers:
         - name: expo-web-container
-          image: "sujeymcw/expo-web-app:local-20260609-124345"
+          image: "sujeymcw/expo-web-app:local-20260609-124823"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -57,17 +57,12 @@ spec:
 # ============================================================
 
 NAME: expo-web-release
-LAST DEPLOYED: Tue Jun  9 12:44:41 2026
+LAST DEPLOYED: Tue Jun  9 12:49:38 2026
 NAMESPACE: default
 STATUS: deployed
-REVISION: 62
+REVISION: 63
 DESCRIPTION: Upgrade complete
 RESOURCES:
-==> v1/Pod(related)
-NAME                                   READY   STATUS      RESTARTS   AGE
-expo-web-deployment-5d9d74d595-22kvr   1/1     Running     0          2s
-expo-web-deployment-9497ddbd5-bqq5s    0/1     Completed   0          3m24s
-
 ==> v1/Service
 NAME               TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)        AGE
 expo-web-service   LoadBalancer   10.96.43.180   172.18.0.2    80:30627/TCP   4d1h
@@ -76,11 +71,16 @@ expo-web-service   LoadBalancer   10.96.43.180   172.18.0.2    80:30627/TCP   4d
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
 expo-web-deployment   1/1     1            1           4d1h
 
+==> v1/Pod(related)
+NAME                                   READY   STATUS      RESTARTS   AGE
+expo-web-deployment-5d9d74d595-22kvr   0/1     Completed   0          4m59s
+expo-web-deployment-79ddffb55b-mxp9t   1/1     Running     0          2s
+
 
 TEST SUITE: None
 NOTES:
 ======================================================================
-Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #62)
+Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #63)
 ======================================================================
 
 STATUS:       Successfully deployed to namespace "default"
@@ -91,7 +91,7 @@ UPDATED AT:
 
 ≡ƒÉ│  ACTIVE CONTAINER MANIFEST:
     Registry: sujeymcw/expo-web-app
-    Image Tag: local-20260609-124345
+    Image Tag: local-20260609-124823
     Pull Policy: IfNotPresent
 
 ≡ƒôè  REAL-TIME DIAGNOSTIC COMMANDS:
@@ -109,7 +109,7 @@ USER-SUPPLIED VALUES:
 image:
   imagePullPolicy: IfNotPresent
   repository: sujeymcw/expo-web-app
-  tag: local-20260609-124345
+  tag: local-20260609-124823
 service:
   port: 80
   type: LoadBalancer
@@ -119,14 +119,14 @@ service:
 # ============================================================
 
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE    CONTAINERS           IMAGES                                        SELECTOR
-expo-web-deployment   1/1     1            1           4d1h   expo-web-container   sujeymcw/expo-web-app:local-20260609-124345   app=expo-web-app
+expo-web-deployment   1/1     1            1           4d1h   expo-web-container   sujeymcw/expo-web-app:local-20260609-124823   app=expo-web-app
 
 # ============================================================
 # KUBERNETES POD STATUS
 # ============================================================
 
 NAME                                   READY   STATUS    RESTARTS   AGE   IP            NODE                    NOMINATED NODE   READINESS GATES
-expo-web-deployment-5d9d74d595-22kvr   1/1     Running   0          3s    10.244.0.28   desktop-control-plane   <none>           <none>
+expo-web-deployment-79ddffb55b-mxp9t   1/1     Running   0          3s    10.244.0.29   desktop-control-plane   <none>           <none>
 
 # ============================================================
 # KUBERNETES SERVICE STATUS
@@ -148,7 +148,7 @@ metrics-pending-pod                        9m           104Mi
 # ============================================================
 
 NAME                    CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
-desktop-control-plane   181m         1%       998Mi           14%         
+desktop-control-plane   188m         1%       1004Mi          14%         
 
 # ============================================================
 # METRICS STATUS
