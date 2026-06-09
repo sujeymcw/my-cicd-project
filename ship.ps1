@@ -269,6 +269,98 @@ function Send-SlackFailure {
     exit 1
 }
 
+
+function Ensure-MetricsServerReady {
+    param (
+        [string]$NamespaceName = "kube-system",
+        [int]$WaitSeconds = 120
+    )
+
+    Write-Output "Checking Kubernetes Metrics Server..."
+
+    try {
+        $metricsDeployment = kubectl get deployment metrics-server -n $NamespaceName 2>$null
+
+        if ($LASTEXITCODE -ne 0 -or -not $metricsDeployment) {
+            Write-Host "Metrics Server not found. Enabling Minikube metrics-server addon..." -ForegroundColor Yellow
+            minikube addons enable metrics-server | Out-Null
+            Start-Sleep -Seconds 5
+        }
+
+        $currentArgs = kubectl get deployment metrics-server -n $NamespaceName -o jsonpath="{.spec.template.spec.containers[0].args}" 2>$null
+
+        if ($currentArgs -notmatch "--kubelet-insecure-tls") {
+            Write-Host "Patching Metrics Server with --kubelet-insecure-tls for Minikube/Docker..." -ForegroundColor Yellow
+            kubectl patch deployment metrics-server -n $NamespaceName --type='json' -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' | Out-Null
+            kubectl rollout restart deployment metrics-server -n $NamespaceName | Out-Null
+        }
+
+        kubectl rollout status deployment/metrics-server -n $NamespaceName --timeout=${WaitSeconds}s | Out-Null
+        Start-Sleep -Seconds 20
+
+        kubectl top nodes 1>$null 2>$null
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Metrics Server is ready." -ForegroundColor Green
+            return $true
+        }
+
+        Write-Host "Metrics Server exists, but metrics API is still warming up." -ForegroundColor Yellow
+        return $false
+    } catch {
+        Write-Host "Metrics Server check failed: $_" -ForegroundColor Yellow
+        return $false
+    }
+}
+
+function Invoke-MetricsCommandToFile {
+    param (
+        [string]$Title,
+        [string]$CommandText,
+        [string]$FallbackCommandText,
+        [string]$OutputFile
+    )
+
+@"
+
+# ============================================================
+# $Title
+# ============================================================
+
+"@ | Out-File $OutputFile -Append -Encoding UTF8
+
+    $result = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$CommandText 2>&1"
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -eq 0 -and $result -and ($result -notmatch "Metrics API not available") -and ($result -notmatch "metrics not available yet")) {
+        $result | Out-File $OutputFile -Append -Encoding UTF8
+        return "Captured"
+    }
+
+    "Metrics not available yet. Showing fallback status instead." | Out-File $OutputFile -Append -Encoding UTF8
+    "Original command: $CommandText" | Out-File $OutputFile -Append -Encoding UTF8
+    "Original output:" | Out-File $OutputFile -Append -Encoding UTF8
+
+    if ($result) {
+        $result | Out-File $OutputFile -Append -Encoding UTF8
+    } else {
+        "No metrics output returned." | Out-File $OutputFile -Append -Encoding UTF8
+    }
+
+    "" | Out-File $OutputFile -Append -Encoding UTF8
+    "Fallback output:" | Out-File $OutputFile -Append -Encoding UTF8
+
+    $fallbackResult = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$FallbackCommandText 2>&1"
+
+    if ($fallbackResult) {
+        $fallbackResult | Out-File $OutputFile -Append -Encoding UTF8
+    } else {
+        "No fallback output returned." | Out-File $OutputFile -Append -Encoding UTF8
+    }
+
+    return "Not available"
+}
+
 function Write-HelmChartOutput {
     param (
         [string]$ImageName,
@@ -322,24 +414,36 @@ function Write-HelmChartOutput {
         -CommandText "kubectl get svc --namespace $namespace -o wide" `
         -OutputFile $helmChartOutputFile
 
-    Invoke-SafeCommandToFile `
+    $metricsServerReady = Ensure-MetricsServerReady
+
+    $podMetricsStatus = Invoke-MetricsCommandToFile `
         -Title "POD CPU AND MEMORY METRICS" `
         -CommandText "kubectl top pods --namespace $namespace" `
+        -FallbackCommandText "kubectl get pods --namespace $namespace -o wide" `
         -OutputFile $helmChartOutputFile
 
-    Invoke-SafeCommandToFile `
+    $nodeMetricsStatus = Invoke-MetricsCommandToFile `
         -Title "NODE CPU AND MEMORY METRICS" `
         -CommandText "kubectl top nodes" `
+        -FallbackCommandText "kubectl get nodes -o wide" `
         -OutputFile $helmChartOutputFile
+
+    if ($metricsServerReady -and $podMetricsStatus -eq "Captured" -and $nodeMetricsStatus -eq "Captured") {
+        $metricsServerStatus = "Active"
+    } elseif ($metricsServerReady) {
+        $metricsServerStatus = "Active but metrics not ready yet"
+    } else {
+        $metricsServerStatus = "Not ready"
+    }
 
 @"
 
 # ============================================================
 # METRICS STATUS
 # ============================================================
-# Metrics Server : Active
-# Pod Metrics    : Captured using kubectl top pods
-# Node Metrics   : Captured using kubectl top nodes
+# Metrics Server : $metricsServerStatus
+# Pod Metrics    : $podMetricsStatus
+# Node Metrics   : $nodeMetricsStatus
 # ============================================================
 
 "@ | Out-File $helmChartOutputFile -Append -Encoding UTF8

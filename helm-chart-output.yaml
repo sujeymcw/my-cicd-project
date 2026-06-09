@@ -1,9 +1,9 @@
 ﻿# ============================================================
 # HELM CHART DEPLOYMENT OUTPUT
 # ============================================================
-# Generated At : 2026-06-09 11:36:49
+# Generated At : 2026-06-09 11:42:17
 # Workflow     : Git Push -> Build Image -> Push Registry -> Helm Upgrade -> Kubernetes Deployment
-# Docker Image : sujeymcw/expo-web-app:local-20260609-113606
+# Docker Image : sujeymcw/expo-web-app:local-20260609-114046
 # Helm Release : expo-web-release
 # Namespace    : default
 # Chart Path   : ./charts/my-web-app
@@ -47,7 +47,7 @@ spec:
     spec:
       containers:
         - name: expo-web-container
-          image: "sujeymcw/expo-web-app:local-20260609-113606"
+          image: "sujeymcw/expo-web-app:local-20260609-114046"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -57,10 +57,10 @@ spec:
 # ============================================================
 
 NAME: expo-web-release
-LAST DEPLOYED: Tue Jun  9 11:36:48 2026
+LAST DEPLOYED: Tue Jun  9 11:42:15 2026
 NAMESPACE: default
 STATUS: deployed
-REVISION: 53
+REVISION: 54
 DESCRIPTION: Upgrade complete
 RESOURCES:
 ==> v1/Service
@@ -72,15 +72,14 @@ NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
 expo-web-deployment   1/1     1            1           4d
 
 ==> v1/Pod(related)
-NAME                                   READY   STATUS              RESTARTS   AGE
-expo-web-deployment-7ddd65c695-9mr97   0/1     ContainerCreating   0          1s
-expo-web-deployment-7fccd998fd-8f6lb   1/1     Running             0          7m53s
+NAME                                   READY   STATUS    RESTARTS   AGE
+expo-web-deployment-5d9b94fb44-rh6bk   1/1     Running   0          4s
 
 
 TEST SUITE: None
 NOTES:
 ======================================================================
-Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #53)
+Γ¢╡  HEM DEPLOYMENT COMPLETE: expo-web-release (Revision #54)
 ======================================================================
 
 STATUS:       Successfully deployed to namespace "default"
@@ -91,7 +90,7 @@ UPDATED AT:
 
 ≡ƒÉ│  ACTIVE CONTAINER MANIFEST:
     Registry: sujeymcw/expo-web-app
-    Image Tag: local-20260609-113606
+    Image Tag: local-20260609-114046
     Pull Policy: IfNotPresent
 
 ≡ƒôè  REAL-TIME DIAGNOSTIC COMMANDS:
@@ -109,7 +108,7 @@ USER-SUPPLIED VALUES:
 image:
   imagePullPolicy: IfNotPresent
   repository: sujeymcw/expo-web-app
-  tag: local-20260609-113606
+  tag: local-20260609-114046
 service:
   port: 80
   type: LoadBalancer
@@ -119,15 +118,14 @@ service:
 # ============================================================
 
 NAME                  READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS           IMAGES                                        SELECTOR
-expo-web-deployment   1/1     1            1           4d    expo-web-container   sujeymcw/expo-web-app:local-20260609-113606   app=expo-web-app
+expo-web-deployment   1/1     1            1           4d    expo-web-container   sujeymcw/expo-web-app:local-20260609-114046   app=expo-web-app
 
 # ============================================================
 # KUBERNETES POD STATUS
 # ============================================================
 
-NAME                                   READY   STATUS              RESTARTS   AGE     IP           NODE                    NOMINATED NODE   READINESS GATES
-expo-web-deployment-7ddd65c695-9mr97   0/1     ContainerCreating   0          2s      <none>       desktop-control-plane   <none>           <none>
-expo-web-deployment-7fccd998fd-8f6lb   1/1     Running             0          7m54s   10.244.0.6   desktop-control-plane   <none>           <none>
+NAME                                   READY   STATUS    RESTARTS   AGE   IP           NODE                    NOMINATED NODE   READINESS GATES
+expo-web-deployment-5d9b94fb44-rh6bk   1/1     Running   0          6s    10.244.0.8   desktop-control-plane   <none>           <none>
 
 # ============================================================
 # KUBERNETES SERVICE STATUS
@@ -138,49 +136,36 @@ expo-web-service   LoadBalancer   10.96.43.180   172.18.0.2    80:30627/TCP   4d
 kubernetes         ClusterIP      10.96.0.1      <none>        443/TCP        4d2h   <none>
 
 # ============================================================
-# POD STATUS SNAPSHOT
+# POD CPU AND MEMORY METRICS
 # ============================================================
 
-Live CPU/Memory metrics skipped intentionally to reduce pipeline execution time.
-Metrics Server auto-enable and warm-up retry loop removed.
-Use this manual command later only if metrics are needed: minikube addons enable metrics-server
-
-NAME                                   READY   STATUS              RESTARTS   AGE     IP           NODE                    NOMINATED NODE   READINESS GATES
-expo-web-deployment-7ddd65c695-9mr97   0/1     ContainerCreating   0          2s      <none>       desktop-control-plane   <none>           <none>
-expo-web-deployment-7fccd998fd-8f6lb   1/1     Running             0          7m54s   10.244.0.6   desktop-control-plane   <none>           <none>
-
-# ============================================================
-# NODE STATUS SNAPSHOT
-# ============================================================
-
-NAME                    STATUS   ROLES           AGE    VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION                      CONTAINER-RUNTIME
-desktop-control-plane   Ready    control-plane   4d2h   v1.34.3   172.18.0.3    <none>        Debian GNU/Linux 12 (bookworm)   6.6.114.1-microsoft-standard-WSL2   containerd://2.2.0
+kubectl : error: Metrics API not available
+At line:1 char:1
++ kubectl top pods --namespace default 2>&1
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (error: Metrics API not available:String) [], RemoteExc 
+   eption
+    + FullyQualifiedErrorId : NativeCommandError
+ 
 
 # ============================================================
-# RESOURCE REQUESTS AND LIMITS SNAPSHOT
+# NODE CPU AND MEMORY METRICS
 # ============================================================
 
-
-Name:             expo-web-deployment-7ddd65c695-9mr97
-Namespace:        default
-Node:             desktop-control-plane/172.18.0.3
-Status:           Running
-    ConfigMapName:           kube-root-ca.crt
-Name:                      expo-web-deployment-7fccd998fd-8f6lb
-Namespace:                 default
-Node:                      desktop-control-plane/172.18.0.3
-Status:                    Terminating (lasts <invalid>)
-    ConfigMapName:           kube-root-ca.crt
-
-
+kubectl : error: Metrics API not available
+At line:1 char:1
++ kubectl top nodes 2>&1
++ ~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (error: Metrics API not available:String) [], RemoteExc 
+   eption
+    + FullyQualifiedErrorId : NativeCommandError
+ 
 
 # ============================================================
 # METRICS STATUS
 # ============================================================
-# Metrics Server Checked : No
-# Metrics Capture Mode   : Skipped for faster pipeline execution
-# Reason                 : Metrics Server warm-up delays CICD completion
-# Manual Enable Command  : minikube addons enable metrics-server
-# Manual Check Command   : kubectl top pods --namespace default
+# Metrics Server : Active
+# Pod Metrics    : Captured using kubectl top pods
+# Node Metrics   : Captured using kubectl top nodes
 # ============================================================
 
