@@ -47,3 +47,4 @@ git --version
 docker --version
 helm version
 kubectl version
+hi
