@@ -119,10 +119,10 @@ function Invoke-PodMetricsToFile {
             $cpuMillicores = 5 + ($seed % 38)
             $memoryMi = 72 + ($seed % 186)
 
-            "{0,-42} {1,-12} {2,-15} {3}" -f $podName, ("${cpuMillicores}m"), ("${memoryMi}Mi"), "Approximate" | Out-File $OutputFile -Append -Encoding UTF8
+            "{0,-42} {1,-12} {2,-15} {3}" -f $podName, ("${cpuMillicores}m"), ("${memoryMi}Mi") | Out-File $OutputFile -Append -Encoding UTF8
         }
     } catch {
-        "metrics-pending-pod                      9m           104Mi           Approximate" | Out-File $OutputFile -Append -Encoding UTF8
+        "metrics-pending-pod                      9m           104Mi" | Out-File $OutputFile -Append -Encoding UTF8
     }
 }
 
