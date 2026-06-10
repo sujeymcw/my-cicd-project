@@ -36,9 +36,24 @@ jobs:
       - name: 5. Enable Metrics Server
         run: |
           minikube addons enable metrics-server
+
           kubectl patch deployment metrics-server -n kube-system --type='json' \
-            -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' || true
-          kubectl rollout status deployment/metrics-server -n kube-system --timeout=120s || true
+            -p='[
+              {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"},
+              {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname"}
+            ]' || true
+
+          kubectl rollout status deployment/metrics-server -n kube-system --timeout=180s || true
+
+          echo "Waiting for Metrics API to become ready..."
+          for i in {1..30}; do
+            if kubectl top nodes >/dev/null 2>&1; then
+              echo "Metrics API is ready."
+              break
+            fi
+            echo "Metrics API not ready yet. Attempt $i/30"
+            sleep 10
+          done
 
       - name: 6. Install Helm
         uses: azure/setup-helm@v4
@@ -96,6 +111,42 @@ jobs:
           kubectl get svc -n default -o wide >> $logFile 2>&1 || true
           echo "" >> $logFile
 
+      - name: 10.5 Capture Real Pod and Node Metrics
+        run: |
+          logFile="./helm-chart-output.yaml"
+          metricsFile="./kubernetes-live-metrics.txt"
+
+          echo "# ============================================================" >> $logFile
+          echo "# REAL KUBERNETES NODE AND POD METRICS" >> $logFile
+          echo "# ============================================================" >> $logFile
+
+          echo "============================================================" > $metricsFile
+          echo "REAL KUBERNETES NODE AND POD METRICS" >> $metricsFile
+          echo "Generated At: $(date -u) UTC" >> $metricsFile
+          echo "============================================================" >> $metricsFile
+          echo "" >> $metricsFile
+
+          echo "# NODE CPU AND MEMORY METRICS" >> $logFile
+          echo "NODE CPU AND MEMORY METRICS" >> $metricsFile
+          kubectl top nodes >> $logFile 2>&1 || true
+          kubectl top nodes >> $metricsFile 2>&1 || true
+          echo "" >> $logFile
+          echo "" >> $metricsFile
+
+          echo "# POD CPU AND MEMORY METRICS - DEFAULT NAMESPACE" >> $logFile
+          echo "POD CPU AND MEMORY METRICS - DEFAULT NAMESPACE" >> $metricsFile
+          kubectl top pods -n default >> $logFile 2>&1 || true
+          kubectl top pods -n default >> $metricsFile 2>&1 || true
+          echo "" >> $logFile
+          echo "" >> $metricsFile
+
+          echo "# POD CPU AND MEMORY METRICS - ALL NAMESPACES" >> $logFile
+          echo "POD CPU AND MEMORY METRICS - ALL NAMESPACES" >> $metricsFile
+          kubectl top pods --all-namespaces >> $logFile 2>&1 || true
+          kubectl top pods --all-namespaces >> $metricsFile 2>&1 || true
+          echo "" >> $logFile
+          echo "" >> $metricsFile
+
       - name: 11. Install Prometheus
         run: |
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
@@ -107,7 +158,9 @@ jobs:
             --create-namespace \
             --set alertmanager.enabled=false \
             --set server.persistentVolume.enabled=false \
-            --set pushgateway.enabled=false
+            --set pushgateway.enabled=false \
+            --set kube-state-metrics.enabled=true \
+            --set prometheus-node-exporter.enabled=true
 
           kubectl rollout status deployment/prometheus-server -n monitoring --timeout=180s
 
@@ -144,7 +197,7 @@ jobs:
                 "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
                 "targets": [
                   {
-                    "expr": "count(up{job=\"kubernetes-nodes\"})",
+                    "expr": "count(up{job=~\".*node.*|.*kubernetes.*\"})",
                     "legendFormat": "Nodes",
                     "refId": "A"
                   }
@@ -154,7 +207,7 @@ jobs:
               {
                 "id": 3,
                 "type": "timeseries",
-                "title": "Node CPU Usage",
+                "title": "Node CPU Usage %",
                 "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
                 "targets": [
                   {
@@ -168,7 +221,7 @@ jobs:
               {
                 "id": 4,
                 "type": "timeseries",
-                "title": "Node Memory Usage",
+                "title": "Node Memory Usage %",
                 "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
                 "targets": [
                   {
@@ -186,8 +239,8 @@ jobs:
                 "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
                 "targets": [
                   {
-                    "expr": "sum by(pod) (rate(container_cpu_usage_seconds_total{container!=\"\", pod!=\"\"}[5m]))",
-                    "legendFormat": "{{pod}}",
+                    "expr": "sum by(namespace, pod) (rate(container_cpu_usage_seconds_total{container!=\"\", pod!=\"\"}[5m]))",
+                    "legendFormat": "{{namespace}}/{{pod}}",
                     "refId": "A"
                   }
                 ],
@@ -200,8 +253,8 @@ jobs:
                 "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
                 "targets": [
                   {
-                    "expr": "sum by(pod) (container_memory_working_set_bytes{container!=\"\", pod!=\"\"})",
-                    "legendFormat": "{{pod}}",
+                    "expr": "sum by(namespace, pod) (container_memory_working_set_bytes{container!=\"\", pod!=\"\"})",
+                    "legendFormat": "{{namespace}}/{{pod}}",
                     "refId": "A"
                   }
                 ],
@@ -276,7 +329,7 @@ jobs:
               waitUntil: 'networkidle'
             });
 
-            await page.waitForTimeout(10000);
+            await page.waitForTimeout(15000);
             await page.screenshot({
               path: 'actual-grafana-dashboard.png',
               fullPage: true
@@ -312,6 +365,18 @@ jobs:
           kubectl get svc -n monitoring -o wide >> $obsFile 2>&1 || true
           echo "" >> $obsFile
 
+          echo "# Real Node Metrics" >> $obsFile
+          kubectl top nodes >> $obsFile 2>&1 || true
+          echo "" >> $obsFile
+
+          echo "# Real Pod Metrics - Default Namespace" >> $obsFile
+          kubectl top pods -n default >> $obsFile 2>&1 || true
+          echo "" >> $obsFile
+
+          echo "# Real Pod Metrics - All Namespaces" >> $obsFile
+          kubectl top pods --all-namespaces >> $obsFile 2>&1 || true
+          echo "" >> $obsFile
+
           echo "# Grafana Dashboard API Validation" >> $obsFile
           curl -s -u admin:admin http://localhost:3000/api/dashboards/uid/cluster-status >> $obsFile || true
           echo "" >> $obsFile
@@ -323,6 +388,7 @@ jobs:
           path: |
             ./helm-chart-output.yaml
             ./observability-audit-report.yaml
+            ./kubernetes-live-metrics.txt
             ./grafana-kubernetes-dashboard.json
             ./grafana-native-dashboard.json
             ./actual-grafana-dashboard.png
