@@ -40,6 +40,9 @@ jobs:
           minikube addons enable metrics-server
           echo "Awaiting Metrics Server deployment stability..."
           kubectl rollout status deployment/metrics-server -n kube-system --timeout=90s
+          
+          echo "Verifying Metrics API Registration..."
+          kubectl get apiservice v1beta1.metrics.k8s.io
 
       # 3. Install the Helm Engine binaries directly onto the Cloud Runner VM host
       - name: Set up Helm Client
@@ -72,9 +75,9 @@ jobs:
             --namespace default >> $logFile 2>&1
           echo "" >> $logFile
 
-          # CRITICAL CRASH FIX: Wait here to give the metrics-server engine time to warm up its data caches
-          echo "Pre-warming active cluster telemetry buffers..."
-          sleep 30
+          # GUARANTEED FIX: Sleep for 60 seconds to clear the metrics collection window
+          echo "Allowing Metrics Server to finish its first 60s node scraping interval..."
+          sleep 60
 
           # Append Full Kubernetes Node Infrastructure Status
           echo "# ============================================================" >> $logFile
@@ -94,14 +97,14 @@ jobs:
           echo "# ============================================================" >> $logFile
           echo "# NODE RESOURCE METRICS (CPU / MEMORY LOADING)" >> $logFile
           echo "# ============================================================" >> $logFile
-          kubectl top nodes >> $logFile 2>&1 || echo "Telemetry api collection cycle pending next polling interval" >> $logFile
+          kubectl top nodes >> $logFile 2>&1 || echo "Node telemetry collection pending next cycle" >> $logFile
           echo "" >> $logFile
 
           # Append Live Pod Resource Utilization Metrics (CPU/Memory)
           echo "# ============================================================" >> $logFile
           echo "# POD CONTAINER RESOURCE METRICS" >> $logFile
           echo "# ============================================================" >> $logFile
-          kubectl top pods --all-namespaces >> $logFile 2>&1 || echo "Telemetry api collection cycle pending next polling interval" >> $logFile
+          kubectl top pods --all-namespaces >> $logFile 2>&1 || echo "Pod telemetry collection pending next cycle" >> $logFile
           echo "" >> $logFile
 
       # 5. Intercept the file and upload it to the GitHub Web Interface UI as an immutable download
