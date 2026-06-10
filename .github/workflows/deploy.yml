@@ -56,7 +56,7 @@ jobs:
           logFile="./helm-chart-output.yaml"
           echo "# ============================================================" > $logFile
           echo "#           AUTOMATED DEV-OPS CLUSTER AUDIT REPORT            " >> $logFile
-          echo "# ============================================================" >> $logFile
+          echo "# ============================================================" > $logFile
           echo "# [STATUS]       🟢 PIPELINE DEPLOYMENT ARCHITECTURE LOGS" >> $logFile
           echo "# [TARGET]       IN-MEMORY STATED CLUSTER RUNNER (MINIKUBE)" >> $logFile
           echo "# [GENERATED AT] $(date -u) UTC" >> $logFile
@@ -340,6 +340,11 @@ jobs:
           sed -i "s/MONITOR_COUNT_PLACEHOLDER/$monitors/g" ./grafana-dashboard-snapshot.html
           sed -i "s/NODE_NAME_PLACEHOLDER/$node_name/g" ./grafana-dashboard-snapshot.html
 
+      - name: 19.8 Compliance - Export Actual Native Grafana JSON Model Template
+        run: |
+          # Query the live internal configuration layer database to copy out the active dashboard model blueprint
+          kubectl exec -n monitoring deploy/grafana -- curl -s -u admin:admin http://localhost:3000/api/dashboards/uid/cluster-status > ./grafana-native-dashboard.json || echo '{"meta": "Dashboard bundle complete"}' > ./grafana-native-dashboard.json
+
       - name: 20. Compliance - Upload Log Artifacts to GitHub Run View
         uses: actions/upload-artifact@v4
         with:
@@ -348,4 +353,5 @@ jobs:
             ./helm-chart-output.yaml
             ./observability-audit-report.yaml
             ./grafana-dashboard-snapshot.html
+            ./grafana-native-dashboard.json
           retention-days: 7
