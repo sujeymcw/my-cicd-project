@@ -103,18 +103,58 @@ jobs:
         run: |
           logFile="./helm-chart-output.yaml"
           echo "# ============================================================" >> $logFile
-          echo "# NODE RESOURCE METRICS (CPU / MEMORY LOADING)" >> $logFile
+          echo "# NODE RESOURCE METRICS (VISUAL GRAPH ALLOCATIONS)" >> $logFile
           echo "# ============================================================" >> $logFile
-          kubectl top nodes >> $logFile 2>&1 || echo "Node telemetry collection pending next cycle" >> $logFile
+          
+          kubectl top nodes --no-headers 2>/dev/null | while read -r line; do
+            if [ ! -z "$line" ]; then
+              name=$(echo $line | awk '{print $1}')
+              cpu_pct=$(echo $line | awk '{print $3}' | tr -d '%')
+              mem_pct=$(echo $line | awk '{print $5}' | tr -d '%')
+              
+              cpu_scale=$((cpu_pct / 10))
+              mem_scale=$((mem_pct / 10))
+              
+              cpu_bar=$(printf '█%.0s' $(seq 1 $cpu_scale 2>/dev/null); printf '░%.0s' $(seq 1 $((10 - cpu_scale))))
+              mem_bar=$(printf '█%.0s' $(seq 1 $mem_scale 2>/dev/null); printf '░%.0s' $(seq 1 $((10 - mem_scale))))
+              
+              echo "Node Name   : $name" >> $logFile
+              echo "  CPU Load   : [$cpu_bar] $cpu_pct%" >> $logFile
+              echo "  Memory Load: [$mem_bar] $mem_pct%" >> $logFile
+              echo "------------------------------------------------------------" >> $logFile
+            fi
+          done || echo "Node performance telemetry collection pending next window" >> $logFile
           echo "" >> $logFile
 
       - name: 15. Metrics Stage - Capture Container Pod Performance
         run: |
           logFile="./helm-chart-output.yaml"
           echo "# ============================================================" >> $logFile
-          echo "# POD CONTAINER RESOURCE METRICS" >> $logFile
+          echo "# POD CONTAINER RESOURCE METRICS (VISUAL CORES ALLOCATION)" >> $logFile
           echo "# ============================================================" >> $logFile
-          kubectl top pods --all-namespaces >> $logFile 2>&1 || echo "Pod telemetry collection pending next cycle" >> $logFile
+          
+          kubectl top pods --all-namespaces --no-headers 2>/dev/null | while read -r line; do
+            if [ ! -z "$line" ]; then
+              ns=$(echo $line | awk '{print $1}')
+              pod=$(echo $line | awk '{print $2}')
+              cpu_raw=$(echo $line | awk '{print $3}' | tr -d 'm')
+              mem_raw=$(echo $line | awk '{print $4}' | tr -d 'Mi')
+              
+              # Normalize visual metrics mapping using safe text math boundaries
+              cpu_scale=$((cpu_raw / 15))
+              if [ $cpu_scale -gt 10 ]; then cpu_scale=10; fi
+              mem_scale=$((mem_raw / 40))
+              if [ $mem_scale -gt 10 ]; then mem_scale=10; fi
+              
+              cpu_bar=$(printf '█%.0s' $(seq 1 $cpu_scale 2>/dev/null); printf '░%.0s' $(seq 1 $((10 - cpu_scale))))
+              mem_bar=$(printf '█%.0s' $(seq 1 $mem_scale 2>/dev/null); printf '░%.0s' $(seq 1 $((10 - mem_scale))))
+              
+              echo "Namespace/Pod : $ns / $pod" >> $logFile
+              echo "  CPU Traffic : [$cpu_bar] ${cpu_raw}m" >> $logFile
+              echo "  Memory Draw : [$mem_bar] ${mem_raw}Mi" >> $logFile
+              echo "------------------------------------------------------------" >> $logFile
+            fi
+          done || echo "Pod container resource metrics matrix initializing next run" >> $logFile
           echo "" >> $logFile
 
       # =========================================================================
@@ -150,8 +190,8 @@ jobs:
           echo "# PROMETHEUS & GRAFANA INFRASTRUCTURE ROLLOUT STATUS" >> $logFile
           echo "# ============================================================" >> $logFile
           
-          # Allow monitoring services to spin up completely inside memory container
-          sleep 45
+          # Stable initialization buffer for container memory runner orchestration
+          sleep 60
           
           kubectl get pods -n monitoring >> $logFile 2>&1 || true
           kubectl get svc -n monitoring >> $logFile 2>&1 || true
@@ -162,7 +202,7 @@ jobs:
           echo "# ============================================================" >> $logFile
           
           echo "--- Prometheus API Control Plane Status ---" >> $logFile
-          kubectl rollout status deployment/prometheus-server -n monitoring --timeout=60s >> $logFile 2>&1 || echo "Prometheus Deployment Pending" >> $logFile
+          kubectl rollout status deployment/prometheus-server -n monitoring --timeout=90s >> $logFile 2>&1 || echo "Prometheus Deployment Pending" >> $logFile
           echo "" >> $logFile
 
           echo "--- Grafana Web Server Response Headers ---" >> $logFile
