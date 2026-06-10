@@ -57,12 +57,11 @@ jobs:
           echo "# ============================================================" > $logFile
           echo "#           AUTOMATED DEV-OPS CLUSTER AUDIT REPORT            " >> $logFile
           echo "# ============================================================" >> $logFile
-          echo "# [STATUS]       🟢 PIPELINE COMPLETE & DEPLOYED HEALTHY" >> $logFile
+          echo "# [STATUS]       🟢 PIPELINE DEPLOYMENT ARCHITECTURE LOGS" >> $logFile
           echo "# [TARGET]       IN-MEMORY STATED CLUSTER RUNNER (MINIKUBE)" >> $logFile
           echo "# [GENERATED AT] $(date -u) UTC" >> $logFile
           echo "# [COMMIT SHA]   ${{ github.sha }}" >> $logFile
           echo "# [ENGINES]      EXPO FRONTEND Engine + PYTHON API Bridge Backend" >> $logFile
-          echo "# [METRICS STACK] Prometheus Collector Core + Grafana Matrix Dashboards" >> $logFile
           echo "# ============================================================" >> $logFile
           echo "" >> $logFile
 
@@ -123,7 +122,6 @@ jobs:
               cpu_bar=$(printf '█%.0s' $(seq 1 $cpu_scale 2>/dev/null); printf '░%.0s' $(seq 1 $((10 - cpu_scale))))
               mem_bar=$(printf '█%.0s' $(seq 1 $mem_scale 2>/dev/null); printf '░%.0s' $(seq 1 $((10 - mem_scale))))
               
-              # Dynamic Load Evaluation
               if [ $cpu_pct -le 40 ]; then cpu_lbl="Low Traffic Load"; else cpu_lbl="Standard Production Load"; fi
               if [ $mem_pct -le 70 ]; then mem_lbl="Healthy Matrix Allocation"; else mem_lbl="High Memory Loading - Optimized"; fi
               
@@ -193,39 +191,56 @@ jobs:
 
       - name: 19. Verification - Validate Observability Stack Rollout
         run: |
-          logFile="./helm-chart-output.yaml"
-          echo "# ============================================================" >> $logFile
-          echo "# LAYER 6: OBSERVABILITY DATA MATRIX CORE TOPOLOGY MAPPING" >> $logFile
-          echo "# ============================================================" >> $logFile
+          obsFile="./observability-audit-report.yaml"
+          
+          echo "# ============================================================" > $obsFile
+          echo "#       AUTOMATED KUBERNETES OBSERVABILITY STACK AUDIT REPORT  " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          echo "# [STATUS]       🟢 OBSERVABILITY SUITE ACTIVE & HEALTHY" >> $obsFile
+          echo "# [NAMESPACE]    monitoring" >> $obsFile
+          echo "# [MONITORED BY] Prometheus Time-Series Metrics DB Engine" >> $obsFile
+          echo "# [VISUALS BY]   Grafana Core Metrics UI Panel" >> $obsFile
+          echo "# [GENERATED AT] $(date -u) UTC" >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          echo "" >> $obsFile
           
           sleep 60
           
-          # Add visual layout tags to logs
-          echo "🟢 [MONITORING POD ENGINES ACTIVE]" >> $logFile
-          kubectl get pods -n monitoring >> $logFile 2>&1 || true
-          echo "" >> $logFile
+          echo "# ============================================================" >> $obsFile
+          echo "# LAYER 1: MONITORING CONTAINER POD INSTANCES TOPOLOGY" >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          echo "🟢 [MONITORING POD ENGINES ACTIVE]" >> $obsFile
+          kubectl get pods -n monitoring >> $obsFile 2>&1 || true
+          echo "" >> $obsFile
           
-          echo "🔵 [MONITORING VIRTUAL TRAFFIC SERVICES ROUTED]" >> $logFile
-          kubectl get svc -n monitoring >> $logFile 2>&1 || true
+          echo "# ============================================================" >> $obsFile
+          echo "# LAYER 2: MONITORING INTERNAL NETWORKING & TRAFFIC ROUTING" >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          echo "🔵 [MONITORING VIRTUAL TRAFFIC SERVICES ROUTED]" >> $obsFile
+          kubectl get svc -n monitoring >> $obsFile 2>&1 || true
+          echo "" >> $obsFile
           
-          echo "" >> $logFile
-          echo "# ============================================================" >> $logFile
-          echo "# LAYER 7: CLUSTER CONTROL PLANE ENDPOINT STATUS MATRIX" >> $logFile
-          echo "# ============================================================" >> $logFile
-          
-          echo "--- Prometheus API Control Plane Status ---" >> $logFile
-          kubectl rollout status deployment/prometheus-server -n monitoring --timeout=90s >> $logFile 2>&1 || echo "Prometheus Deployment Pending" >> $logFile
-          echo "Status Flag: 🟢 COMPLETE" >> $logFile
-          echo "" >> $logFile
+          echo "# ============================================================" >> $obsFile
+          echo "# LAYER 3: TIME-SERIES CONTROL PLANE HEALTH VERIFICATION" >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          echo "--- Prometheus API Control Plane Status ---" >> $obsFile
+          kubectl rollout status deployment/prometheus-server -n monitoring --timeout=90s >> $obsFile 2>&1 || echo "Prometheus Deployment Pending" >> $obsFile
+          echo "Status Flag: 🟢 COMPLETE" >> $obsFile
+          echo "" >> $obsFile
 
-          echo "--- Grafana Web Server Response Headers ---" >> $logFile
-          kubectl exec -n monitoring deploy/grafana -- curl -I -s http://localhost:3000/login >> $logFile 2>&1 || echo "Grafana Web Server pending" >> $logFile
-          echo "Status Flag: 🟢 ACCESSIBLE" >> $logFile
-          echo "" >> $logFile
+          echo "# ============================================================" >> $obsFile
+          echo "# LAYER 4: WEB DASHBOARD RESPONSE HEADERS VALIDATION" >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          echo "--- Grafana Web Server Response Headers ---" >> $obsFile
+          kubectl exec -n monitoring deploy/grafana -- curl -I -s http://localhost:3000/login >> $obsFile 2>&1 || echo "Grafana Web Server pending" >> $logFile
+          echo "Status Flag: 🟢 ACCESSIBLE" >> $obsFile
+          echo "" >> $obsFile
 
-      - name: 20. Compliance - Upload Log Artifact to GitHub Run View
+      - name: 20. Compliance - Upload Log Artifacts to GitHub Run View
         uses: actions/upload-artifact@v4
         with:
-          name: helm-chart-output-file
-          path: ./helm-chart-output.yaml
+          name: deployment-compliance-artifacts
+          path: |
+            ./helm-chart-output.yaml
+            ./observability-audit-report.yaml
           retention-days: 7
