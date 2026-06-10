@@ -123,37 +123,3 @@ jobs:
           name: helm-chart-output-file
           path: ./helm-chart-output.yaml
           retention-days: 7
-
-      # =========================================================================
-      # POST-BUILD NOTIFICATION MATRIX (Bypasses License Blockades via Free Email API)
-      # =========================================================================
-
-      - name: 17. Notification - Dispatch Compliance Email via SendGrid API
-        if: always()
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.sendgrid.net
-          server_port: 465
-          secure: true
-          username: apikey
-          password: ${{ secrets.SENDGRID_API_KEY }}
-          subject: 'DevOps Audit Report: ${{ github.repository }} - Build ${{ job.status }}'
-          to: ${{ secrets.MAIL_RECIPIENT }}
-          from: 'DevOps Automation Engine <no-reply@sendgrid.net>'
-          body: |
-            Hi Team,
-
-            The cloud-isolated deployment pipeline has completed its run loop.
-
-            - Pipeline Run Status:  ${{ job.status }}
-            - Originating Commit:   ${{ github.sha }}
-            - Executed Branch:      ${{ github.ref }}
-            
-            The generated deployment manifest along with live cluster telemetry node and pod metrics has been attached to this email for your compliance records.
-
-            You can also verify logs and review history directly from the GitHub Actions dashboard link:
-            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            Regards,  
-            DevOps CI/CD Automation Engine
-          attachments: ./helm-chart-output.yaml
