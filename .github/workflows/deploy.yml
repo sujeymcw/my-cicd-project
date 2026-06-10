@@ -10,16 +10,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
+      - name: 1. Workspace - Checkout Repository Code
         uses: actions/checkout@v4
 
-      - name: Log in to Docker Hub
+      - name: 2. Registry - Authenticate to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
-      - name: Build and Push Docker Image
+      - name: 3. Core Engine - Multi-Stage Docker Build and Push
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -28,41 +28,42 @@ jobs:
           no-cache: true
           tags: ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}
 
-      # 1. Spin up an embedded Minikube cluster engine inside the cloud runner memory
-      - name: Provision Embedded Cloud Minikube
+      - name: 4. Infrastructure - Provision Cloud Minikube Cluster
         uses: medyagh/setup-minikube@master
         with:
           cache: true
 
-      # 2. Force-activate and stabilize the Kubernetes Metrics Server addon
-      - name: Enable and Await K8s Metrics Server
+      - name: 5. Telemetry - Activate K8s Metrics Server Addon
         run: |
           minikube addons enable metrics-server
-          echo "Awaiting Metrics Server deployment stability..."
+
+      - name: 6. Telemetry - Patch Metrics Server for Cloud TLS
+        run: |
+          kubectl patch deployment metrics-server -n kube-system --type='json' -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-insecure-tls"}]'
+
+      - name: 7. Verification - Await Metrics Server Handshake Stability
+        run: |
           kubectl rollout status deployment/metrics-server -n kube-system --timeout=90s
-          
-          echo "Verifying Metrics API Registration..."
           kubectl get apiservice v1beta1.metrics.k8s.io
 
-      # 3. Install the Helm Engine binaries directly onto the Cloud Runner VM host
-      - name: Set up Helm Client
+      - name: 8. Binaries - Install Helm Client Engine
         uses: azure/setup-helm@v4
         with:
           version: 'v3.12.0'
 
-      # 4. Compile the cloud Helm chart template logs alongside live metrics server states
-      - name: Generate Cloud Helm Chart Output File
+      - name: 9. Template Initialize - Create Base Logging Logfile
         run: |
           logFile="./helm-chart-output.yaml"
-
           echo "# ============================================================" > $logFile
           echo "# VIRTUALIZED CLOUD RUNNER IN-MEMORY DEPLOYMENT" >> $logFile
           echo "# Generated At : $(date -u)" >> $logFile
           echo "# Commit SHA   : ${{ github.sha }}" >> $logFile
           echo "# ============================================================" >> $logFile
           echo "" >> $logFile
-          
-          # Append the rendered Helm structural template
+
+      - name: 10. Helm Stage - Render Manifest Dry-Run Templates
+        run: |
+          logFile="./helm-chart-output.yaml"
           echo "# ============================================================" >> $logFile
           echo "# HELM RENDERED MANIFEST" >> $logFile
           echo "# ============================================================" >> $logFile
@@ -75,42 +76,84 @@ jobs:
             --namespace default >> $logFile 2>&1
           echo "" >> $logFile
 
-          # GUARANTEED FIX: Sleep for 60 seconds to clear the metrics collection window
-          echo "Allowing Metrics Server to finish its first 60s node scraping interval..."
+      - name: 11. Telemetry - Cool Down Interval for API Collection
+        run: |
+          echo "Allowing patched Metrics Server to finish its scraping interval..."
           sleep 60
 
-          # Append Full Kubernetes Node Infrastructure Status
+      - name: 12. K8s Stage - Query Node Infrastructure Status
+        run: |
+          logFile="./helm-chart-output.yaml"
           echo "# ============================================================" >> $logFile
           echo "# KUBERNETES NODE INFRASTRUCTURE STATUS" >> $logFile
           echo "# ============================================================" >> $logFile
           kubectl get nodes -o wide >> $logFile 2>&1 || true
           echo "" >> $logFile
 
-          # Append Full Kubernetes Pod Lifecycle Status
+      - name: 13. K8s Stage - Query Active Pod Runtime Status
+        run: |
+          logFile="./helm-chart-output.yaml"
           echo "# ============================================================" >> $logFile
           echo "# KUBERNETES POD RUNTIME STATUS" >> $logFile
           echo "# ============================================================" >> $logFile
           kubectl get pods --all-namespaces -o wide >> $logFile 2>&1 || true
           echo "" >> $logFile
 
-          # Append Live Node Resource Utilization Metrics (CPU/Memory)
+      - name: 14. Metrics Stage - Capture Node Resource Performance
+        run: |
+          logFile="./helm-chart-output.yaml"
           echo "# ============================================================" >> $logFile
           echo "# NODE RESOURCE METRICS (CPU / MEMORY LOADING)" >> $logFile
           echo "# ============================================================" >> $logFile
           kubectl top nodes >> $logFile 2>&1 || echo "Node telemetry collection pending next cycle" >> $logFile
           echo "" >> $logFile
 
-          # Append Live Pod Resource Utilization Metrics (CPU/Memory)
+      - name: 15. Metrics Stage - Capture Container Pod Performance
+        run: |
+          logFile="./helm-chart-output.yaml"
           echo "# ============================================================" >> $logFile
           echo "# POD CONTAINER RESOURCE METRICS" >> $logFile
           echo "# ============================================================" >> $logFile
           kubectl top pods --all-namespaces >> $logFile 2>&1 || echo "Pod telemetry collection pending next cycle" >> $logFile
           echo "" >> $logFile
 
-      # 5. Intercept the file and upload it to the GitHub Web Interface UI as an immutable download
-      - name: Upload Helm Output Artifact to GitHub Run View
+      - name: 16. Compliance - Upload Log Artifact to GitHub Run View
         uses: actions/upload-artifact@v4
         with:
           name: helm-chart-output-file
           path: ./helm-chart-output.yaml
           retention-days: 7
+
+      # =========================================================================
+      # POST-BUILD NOTIFICATION MATRIX (Outlook Only with Log Attachment)
+      # =========================================================================
+
+      - name: 17. Notification - Dispatch Compliance Email via Outlook SMTP
+        uses: dawidd6/action-send-mail@v3
+        if: always() # Sends formal status report automatically even if previous steps fail
+        with:
+          server_address: smtp.office365.com
+          server_port: 587 
+          secure: false 
+          username: ${{ secrets.OUTLOOK_MAIL_USERNAME }}
+          password: ${{ secrets.OUTLOOK_MAIL_PASSWORD }}
+          subject: 'DevOps Audit Report: ${{ github.repository }} - Build ${{ job.status }}'
+          to: ${{ secrets.MAIL_RECIPIENT }}
+          from: 'GitHub Enterprise Automation <${{ secrets.OUTLOOK_MAIL_USERNAME }}>'
+          body: |
+            Hi Team,
+
+            The cloud-isolated deployment pipeline has completed its run loop.
+
+            - Pipeline Run Status: ${{ job.status }}
+            - Originating Commit: ${{ github.sha }}
+            - Executed Branch: ${{ github.ref }}
+            
+            The generated deployment manifest along with live cluster telemetry node and pod metrics has been attached to this email for your compliance records.
+
+            You can also verify logs and review history directly from the GitHub Actions dashboard link:
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Regards,  
+            DevOps CI/CD Automation Engine
+          attachments: ./helm-chart-output.yaml
