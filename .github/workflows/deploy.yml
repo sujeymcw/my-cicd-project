@@ -34,7 +34,7 @@ jobs:
         with:
           version: 'v3.12.0'
 
-      # 2. Compile the cloud Helm chart template logs cleanly
+      # 2. Compile the cloud Helm chart template logs cleanly along with active cluster telemetry
       - name: Generate Cloud Helm Chart Output File
         run: |
           echo "# ============================================================" > ./helm-chart-output.yaml
@@ -44,6 +44,10 @@ jobs:
           echo "# ============================================================" >> ./helm-chart-output.yaml
           echo "" >> ./helm-chart-output.yaml
           
+          # Append the rendered Helm structural template
+          echo "# ============================================================" >> ./helm-chart-output.yaml
+          echo "# HELM RENDERED MANIFEST" >> ./helm-chart-output.yaml
+          echo "# ============================================================" >> ./helm-chart-output.yaml
           helm template expo-web-release ./charts/my-web-app \
             --set image.repository="${{ secrets.REGISTRY_USERNAME }}/expo-web-app" \
             --set image.tag="${{ github.sha }}" \
@@ -51,6 +55,35 @@ jobs:
             --set service.type="LoadBalancer" \
             --set service.port=80 \
             --namespace default >> ./helm-chart-output.yaml
+          echo "" >> ./helm-chart-output.yaml
+
+          # Append Full Kubernetes Node Infrastructure Status
+          echo "# ============================================================" >> ./helm-chart-output.yaml
+          echo "# KUBERNETES NODE INFRASTRUCTURE STATUS" >> ./helm-chart-output.yaml
+          echo "# ============================================================" >> ./helm-chart-output.yaml
+          kubectl get nodes -o wide 2>&1 >> ./helm-chart-output.yaml || echo "kubectl not connected to active context" >> ./helm-chart-output.yaml
+          echo "" >> ./helm-chart-output.yaml
+
+          # Append Full Kubernetes Pod Lifecycle Status
+          echo "# ============================================================" >> ./helm-chart-output.yaml
+          echo "# KUBERNETES POD RUNTIME STATUS" >> ./helm-chart-output.yaml
+          echo "# ============================================================" >> ./helm-chart-output.yaml
+          kubectl get pods --namespace default -o wide 2>&1 >> ./helm-chart-output.yaml || echo "kubectl not connected to active context" >> ./helm-chart-output.yaml
+          echo "" >> ./helm-chart-output.yaml
+
+          # Append Live Node Resource Utilization Metrics (CPU/Memory)
+          echo "# ============================================================" >> ./helm-chart-output.yaml
+          echo "# NODE RESOURCE METRICS (CPU / MEMORY LOADING)" >> ./helm-chart-output.yaml
+          echo "# ============================================================" >> ./helm-chart-output.yaml
+          kubectl top nodes 2>&1 >> ./helm-chart-output.yaml || echo "Metrics engine unavailable in cloud instance" >> ./helm-chart-output.yaml
+          echo "" >> ./helm-chart-output.yaml
+
+          # Append Live Pod Resource Utilization Metrics (CPU/Memory)
+          echo "# ============================================================" >> ./helm-chart-output.yaml
+          echo "# POD CONTAINER RESOURCE METRICS (CPU / MEMORY LOADING)" >> ./helm-chart-output.yaml
+          echo "# ============================================================" >> ./helm-chart-output.yaml
+          kubectl top pods --namespace default 2>&1 >> ./helm-chart-output.yaml || echo "Metrics engine unavailable in cloud instance" >> ./helm-chart-output.yaml
+          echo "" >> ./helm-chart-output.yaml
 
       # 3. Intercept the file and upload it to the GitHub Web Interface UI as an immutable download
       - name: Upload Helm Output Artifact to GitHub Run View
