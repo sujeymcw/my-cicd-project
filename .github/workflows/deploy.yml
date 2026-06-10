@@ -236,25 +236,47 @@ jobs:
           echo "Status Flag: 🟢 ACCESSIBLE" >> $obsFile
           echo "" >> $obsFile
 
-      - name: 19.5 Compliance - Capture Dashboard Snapshot
+      - name: 19.5 Node Setup - Install Headless Browser Engine for Visual Compliance
+        run: |
+          # 1. Install Node.js runtime engine
+          sudo apt-get update
+          sudo apt-get install -y nodejs npm
+          
+          # 2. Setup standard headless rendering utility (Puppeteer)
+          npm install puppeteer --save
+
+      - name: 19.8 Compliance - Capture ACTUAL Grafana Dashboard Snapshot Image
         run: |
           # Inject automated community Kubernetes dashboard template configuration via Grafana API
           curl -s -X POST -H "Content-Type: application/json" \
             -d '{"dashboard": {"id": null, "title": "Cluster Status", "panels": []}, "overwrite": true}' \
             http://admin:admin@localhost:3000/api/dashboards/db || true
             
-          # Extract live metrics snapshot markup directly into an audit layout webpage file
-          echo "<html><body style='font-family:sans-serif; background:#111217; color:#fff; padding:30px;'>" > ./grafana-dashboard-snapshot.html
-          echo "<h2>🟢 DevOps Live Cluster Observability Snapshot Report</h2>" >> ./grafana-dashboard-snapshot.html
-          echo "<hr style='border-color:#333;'><br>" >> ./grafana-dashboard-snapshot.html
-          echo "<div style='background:#181b1f; padding:20px; border-radius:5px; border:1px solid #2c323a;'>" >> ./grafana-dashboard-snapshot.html
-          echo "<h4>System Diagnostics Summary Matrix:</h4>" >> ./grafana-dashboard-snapshot.html
-          echo "<ul>" >> ./grafana-dashboard-snapshot.html
-          echo "  <li>Active Pods Monitored: $(kubectl get pods --all-namespaces --no-headers | wc -l)</li>" >> ./grafana-dashboard-snapshot.html
-          echo "  <li>Prometheus Database Stream: Connected & Scraping</li>" >> ./grafana-dashboard-snapshot.html
-          echo "  <li>Grafana Presentation Engine: Healthy & Status 200</li>" >> ./grafana-dashboard-snapshot.html
-          echo "</ul>" >> ./grafana-dashboard-snapshot.html
-          echo "</div></body></html>" >> ./grafana-dashboard-snapshot.html
+          # Wait until the visual engine finishes loading data and charts
+          sleep 10
+          
+          # Create and execute the headless browser snapshot automation script
+          node << 'EOF'
+          const puppeteer = require('puppeteer');
+          const fs = require('fs');
+
+          (async () => {
+            const browser = await puppeteer.launch({headless: "new", args: ['--no-sandbox', '--disable-setuid-sandbox']});
+            const page = await browser.newPage();
+            
+            // Navigate to Grafana Control Panel and authenticate via Admin API bridge
+            await page.goto('http://admin:admin@localhost:3000/d/cluster-status?orgId=1');
+            
+            // Wait until the main grid visualization matrix elements appear on screen
+            await page.waitForSelector('.grid-stack');
+            
+            // Capture pixel-perfect visual dashboard snapshot image artifact
+            await page.screenshot({ path: './grafana-dashboard-snapshot.png', fullPage: true });
+            
+            await browser.close();
+            console.log('Visual dashboard screenshot generated: ./grafana-dashboard-snapshot.png');
+          })();
+          EOF
 
       - name: 20. Compliance - Upload Log Artifacts to GitHub Run View
         uses: actions/upload-artifact@v4
@@ -263,5 +285,5 @@ jobs:
           path: |
             ./helm-chart-output.yaml
             ./observability-audit-report.yaml
-            ./grafana-dashboard-snapshot.html
+            ./grafana-dashboard-snapshot.png
           retention-days: 7
