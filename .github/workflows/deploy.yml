@@ -149,9 +149,25 @@ jobs:
           echo "# ============================================================" >> $logFile
           echo "# PROMETHEUS & GRAFANA INFRASTRUCTURE ROLLOUT STATUS" >> $logFile
           echo "# ============================================================" >> $logFile
-          sleep 30
+          
+          # Allow monitoring services to spin up completely inside memory container
+          sleep 45
+          
           kubectl get pods -n monitoring >> $logFile 2>&1 || true
           kubectl get svc -n monitoring >> $logFile 2>&1 || true
+          
+          echo "" >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "# OBSERVABILITY ENDPOINT VERIFICATION TARGETS" >> $logFile
+          echo "# ============================================================" >> $logFile
+          
+          echo "--- Prometheus API Health Status ---" >> $logFile
+          kubectl exec -n monitoring deploy/prometheus-server -c prometheus-server -- curl -s http://localhost:9090/-/healthy >> $logFile 2>&1 || echo "Prometheus API pending" >> $logFile
+          echo "" >> $logFile
+
+          echo "--- Grafana Web Server Response Headers ---" >> $logFile
+          kubectl exec -n monitoring deploy/grafana -- curl -I -s http://localhost:3000/login >> $logFile 2>&1 || echo "Grafana Web Server pending" >> $logFile
+          echo "" >> $logFile
 
       - name: 20. Compliance - Upload Log Artifact to GitHub Run View
         uses: actions/upload-artifact@v4
