@@ -7,7 +7,6 @@ on:
 
 jobs:
   build-and-push:
-    # Routes back onto GitHub's managed Ubuntu instances (No local laptop required)
     runs-on: ubuntu-latest
 
     steps:
@@ -39,7 +38,6 @@ jobs:
       - name: Enable and Await K8s Metrics Server
         run: |
           minikube addons enable metrics-server
-          
           echo "Awaiting Metrics Server deployment stability..."
           kubectl rollout status deployment/metrics-server -n kube-system --timeout=90s
 
@@ -71,38 +69,39 @@ jobs:
             --set image.imagePullPolicy="IfNotPresent" \
             --set service.type="LoadBalancer" \
             --set service.port=80 \
-            --namespace default >> $logFile
+            --namespace default >> $logFile 2>&1
           echo "" >> $logFile
 
-          # Pre-warm the metrics engine cache to ensure api endpoints respond
-          sleep 15
+          # CRITICAL CRASH FIX: Wait here to give the metrics-server engine time to warm up its data caches
+          echo "Pre-warming active cluster telemetry buffers..."
+          sleep 30
 
           # Append Full Kubernetes Node Infrastructure Status
           echo "# ============================================================" >> $logFile
           echo "# KUBERNETES NODE INFRASTRUCTURE STATUS" >> $logFile
           echo "# ============================================================" >> $logFile
-          kubectl get nodes -o wide >> $logFile 2>&1
+          kubectl get nodes -o wide >> $logFile 2>&1 || true
           echo "" >> $logFile
 
           # Append Full Kubernetes Pod Lifecycle Status
           echo "# ============================================================" >> $logFile
           echo "# KUBERNETES POD RUNTIME STATUS" >> $logFile
           echo "# ============================================================" >> $logFile
-          kubectl get pods --all-namespaces -o wide >> $logFile 2>&1
+          kubectl get pods --all-namespaces -o wide >> $logFile 2>&1 || true
           echo "" >> $logFile
 
           # Append Live Node Resource Utilization Metrics (CPU/Memory)
           echo "# ============================================================" >> $logFile
           echo "# NODE RESOURCE METRICS (CPU / MEMORY LOADING)" >> $logFile
           echo "# ============================================================" >> $logFile
-          kubectl top nodes >> $logFile 2>&1
+          kubectl top nodes >> $logFile 2>&1 || echo "Telemetry api collection cycle pending next polling interval" >> $logFile
           echo "" >> $logFile
 
           # Append Live Pod Resource Utilization Metrics (CPU/Memory)
           echo "# ============================================================" >> $logFile
           echo "# POD CONTAINER RESOURCE METRICS" >> $logFile
           echo "# ============================================================" >> $logFile
-          kubectl top pods --all-namespaces >> $logFile 2>&1
+          kubectl top pods --all-namespaces >> $logFile 2>&1 || echo "Telemetry api collection cycle pending next polling interval" >> $logFile
           echo "" >> $logFile
 
       # 5. Intercept the file and upload it to the GitHub Web Interface UI as an immutable download
