@@ -64,7 +64,7 @@ jobs:
       - name: 10. Helm Stage - Render Manifest Dry-Run Templates
         run: |
           logFile="./helm-chart-output.yaml"
-          echo "# ============================================================" >> $logFile
+          echo "# ============================================================" > $logFile
           echo "# HELM RENDERED MANIFEST" >> $logFile
           echo "# ============================================================" >> $logFile
           helm template expo-web-release ./charts/my-web-app \
@@ -125,35 +125,17 @@ jobs:
           retention-days: 7
 
       # =========================================================================
-      # POST-BUILD NOTIFICATION MATRIX (Outlook Only with Log Attachment)
+      # POST-BUILD NOTIFICATION MATRIX (Power Automate Outlook Integration)
       # =========================================================================
 
-      - name: 17. Notification - Dispatch Compliance Email via Outlook SMTP
-        uses: dawidd6/action-send-mail@v3
+      - name: 17. Notification - Route Status Payload to Outlook via Power Automate
         if: always() # Sends formal status report automatically even if previous steps fail
-        with:
-          server_address: smtp.office365.com
-          server_port: 587 
-          secure: false 
-          username: ${{ secrets.OUTLOOK_MAIL_USERNAME }}
-          password: ${{ secrets.OUTLOOK_MAIL_PASSWORD }}
-          subject: 'DevOps Audit Report: ${{ github.repository }} - Build ${{ job.status }}'
-          to: ${{ secrets.MAIL_RECIPIENT }}
-          from: 'GitHub Enterprise Automation <${{ secrets.OUTLOOK_MAIL_USERNAME }}>'
-          body: |
-            Hi Team,
-
-            The cloud-isolated deployment pipeline has completed its run loop.
-
-            - Pipeline Run Status: ${{ job.status }}
-            - Originating Commit: ${{ github.sha }}
-            - Executed Branch: ${{ github.ref }}
-            
-            The generated deployment manifest along with live cluster telemetry node and pod metrics has been attached to this email for your compliance records.
-
-            You can also verify logs and review history directly from the GitHub Actions dashboard link:
-            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            Regards,  
-            DevOps CI/CD Automation Engine
-          attachments: ./helm-chart-output.yaml
+        run: |
+          curl -X POST -H "Content-Type: application/json" \
+            -d '{
+              "status": "${{ job.status }}",
+              "commit": "${{ github.sha }}",
+              "repo": "${{ github.repository }}",
+              "run_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }' \
+            ${{ secrets.POWER_AUTOMATE_WEBHOOK_URL }}
