@@ -161,8 +161,8 @@ jobs:
           echo "# OBSERVABILITY ENDPOINT VERIFICATION TARGETS" >> $logFile
           echo "# ============================================================" >> $logFile
           
-          echo "--- Prometheus API Health Status ---" >> $logFile
-          kubectl exec -n monitoring deploy/prometheus-server -c prometheus-server -- curl -s http://localhost:9090/-/healthy >> $logFile 2>&1 || echo "Prometheus API pending" >> $logFile
+          echo "--- Prometheus API Control Plane Status ---" >> $logFile
+          kubectl rollout status deployment/prometheus-server -n monitoring --timeout=60s >> $logFile 2>&1 || echo "Prometheus Deployment Pending" >> $logFile
           echo "" >> $logFile
 
           echo "--- Grafana Web Server Response Headers ---" >> $logFile
