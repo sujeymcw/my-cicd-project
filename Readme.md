@@ -403,3 +403,6 @@ Full Stack Developer | DevOps Enthusiast | KAAVAL Hackathon Winner
 ## ⭐ One-Line Summary
 
 **A complete GitOps-powered DevOps platform that automates Docker builds, Kubernetes deployments, observability provisioning, infrastructure auditing, and deployment reporting from a single Git push.**
+
+
+adddd
