@@ -1,4 +1,4 @@
-# 🚀 GitOps Control Plane & Automated CI/CD Pipeline
+# 🚀 DevOps Control Plane & Automated CI/CD Pipeline
 
 Enterprise-grade GitOps platform for automating containerized application delivery, Kubernetes orchestration, observability, deployment reporting, and infrastructure telemetry.
 
