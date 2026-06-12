@@ -71,10 +71,17 @@ jobs:
           echo "# ============================================================" >> $logFile
           echo "# PODS BEFORE APP DEPLOY (cluster baseline - kube-system etc) " >> $logFile
           echo "# ============================================================" >> $logFile
+          echo "# These pods exist purely because Kubernetes itself needs them" >> $logFile
+          echo "# to run (control plane: etcd, apiserver, scheduler, controller-" >> $logFile
+          echo "# manager, coredns, kube-proxy, storage-provisioner, metrics-" >> $logFile
+          echo "# server). This is the minimum baseline on ANY cluster, before" >> $logFile
+          echo "# your application or any monitoring tools are deployed." >> $logFile
+          echo "" >> $logFile
           kubectl get pods --all-namespaces -o wide >> $logFile 2>&1 || true
           BEFORE_COUNT=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
+          echo "BEFORE_COUNT=$BEFORE_COUNT" > /tmp/podcounts.env
           echo "" >> $logFile
-          echo "# Total pods BEFORE app deploy : $BEFORE_COUNT" >> $logFile
+          echo "# Total pods BEFORE app deploy (baseline) : $BEFORE_COUNT" >> $logFile
           echo "" >> $logFile
 
       - name: 6. Install Helm
@@ -112,16 +119,28 @@ jobs:
             --set service.port=80 \
             --namespace default
 
-      - name: 9.5 Snapshot - Pods DURING Rollout
+      - name: 9.5 Snapshot - Pods DURING/AFTER Rollout
         run: |
           logFile="./helm-chart-output.yaml"
+
+          echo "Waiting for app pod to become Ready before snapshotting..."
+          kubectl rollout status deployment/expo-web-deployment -n default --timeout=120s || true
+
           echo "# ============================================================" >> $logFile
-          echo "# PODS DURING ROLLOUT (app namespace = default)               " >> $logFile
+          echo "# PODS AFTER APP DEPLOY (default namespace)                   " >> $logFile
           echo "# ============================================================" >> $logFile
+          echo "# This is the application pod created by the Helm chart" >> $logFile
+          echo "# 'my-web-app'. Compare to the baseline above - this is the" >> $logFile
+          echo "# ONLY pod added by your actual application." >> $logFile
+          echo "" >> $logFile
           kubectl get pods -n default -o wide >> $logFile 2>&1 || true
           ROLLOUT_COUNT=$(kubectl get pods -n default --no-headers 2>/dev/null | wc -l)
+          AFTER_TOTAL=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
+          echo "AFTER_TOTAL=$AFTER_TOTAL" >> /tmp/podcounts.env
           echo "" >> $logFile
           echo "# Pods created by this Helm release (default ns) : $ROLLOUT_COUNT" >> $logFile
+          echo "# Total pods across cluster after app deploy     : $AFTER_TOTAL" >> $logFile
+          echo "# Net new pods added by app deploy (after - before baseline) : $ROLLOUT_COUNT" >> $logFile
           echo "" >> $logFile
 
       - name: 10. Verify Application Rollout (Minimised)
@@ -215,6 +234,20 @@ jobs:
           echo "# ============================================================" >> $logFile
           echo "# POD METRICS - DEFAULT NAMESPACE (CPU=millicores/1000m  MEM=MiB/512MiB)" >> $logFile
           echo "# ============================================================" >> $logFile
+          echo "# NOTE: metrics-server needs ~15-30s of pod runtime before it" >> $logFile
+          echo "# has scrape data. We retry below to avoid 'metrics not" >> $logFile
+          echo "# available yet' errors on freshly-created pods." >> $logFile
+          echo "" >> $logFile
+
+          echo "Waiting for pod metrics to become available..."
+          for i in {1..12}; do
+            if kubectl top pods -n default >/dev/null 2>&1; then
+              echo "Pod metrics ready."
+              break
+            fi
+            echo "Pod metrics not ready yet. Attempt $i/12"
+            sleep 10
+          done
 
           POD_DEFAULT_RAW=$(kubectl top pods -n default 2>&1 || true)
           echo "$POD_DEFAULT_RAW" >> $logFile
@@ -276,6 +309,24 @@ jobs:
             --set prometheus-node-exporter.enabled=true
 
           kubectl rollout status deployment/prometheus-server -n monitoring --timeout=180s
+
+      - name: 11.5 Snapshot - Pods AFTER Prometheus Install
+        run: |
+          logFile="./helm-chart-output.yaml"
+          echo "# ============================================================" >> $logFile
+          echo "# PODS AFTER PROMETHEUS INSTALL (monitoring namespace)        " >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "# Prometheus stack adds: prometheus-server, kube-state-metrics," >> $logFile
+          echo "# and a prometheus-node-exporter pod on EVERY node (DaemonSet)." >> $logFile
+          echo "" >> $logFile
+          kubectl get pods -n monitoring -o wide >> $logFile 2>&1 || true
+          PROM_STEP_COUNT=$(kubectl get pods -n monitoring --no-headers 2>/dev/null | wc -l)
+          TOTAL_AFTER_PROM=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
+          echo "TOTAL_AFTER_PROM=$TOTAL_AFTER_PROM" >> /tmp/podcounts.env
+          echo "" >> $logFile
+          echo "# Pods in monitoring ns after Prometheus install : $PROM_STEP_COUNT" >> $logFile
+          echo "# Total pods across cluster after Prometheus     : $TOTAL_AFTER_PROM" >> $logFile
+          echo "" >> $logFile
 
       - name: 12. Create Real Grafana Dashboard ConfigMap
         run: |
@@ -404,6 +455,40 @@ jobs:
             --set datasources."datasources\.yaml".datasources[0].isDefault=true
 
           kubectl rollout status deployment/grafana -n monitoring --timeout=180s
+
+      - name: 13.5 Snapshot - Pods AFTER Grafana Install (Final Summary)
+        run: |
+          logFile="./helm-chart-output.yaml"
+          source /tmp/podcounts.env || true
+          echo "# ============================================================" >> $logFile
+          echo "# PODS AFTER GRAFANA INSTALL (monitoring namespace)           " >> $logFile
+          echo "# ============================================================" >> $logFile
+          kubectl get pods -n monitoring -o wide >> $logFile 2>&1 || true
+          MONITORING_FINAL=$(kubectl get pods -n monitoring --no-headers 2>/dev/null | wc -l)
+          TOTAL_FINAL=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
+          NODE_FINAL=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
+          echo "" >> $logFile
+          echo "# Pods in monitoring ns after Grafana install : $MONITORING_FINAL" >> $logFile
+          echo "# Total pods across cluster (final)           : $TOTAL_FINAL" >> $logFile
+          echo "" >> $logFile
+
+          echo "# ============================================================" >> $logFile
+          echo "# POD COUNT PROGRESSION SUMMARY (per pipeline step)           " >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "# Stage                                  | Pods (cumulative)" >> $logFile
+          echo "# ---------------------------------------|------------------" >> $logFile
+          echo "# 1. Before app deploy (K8s baseline)    | $BEFORE_COUNT" >> $logFile
+          echo "# 2. After app deploy (+your app pod)    | $AFTER_TOTAL" >> $logFile
+          echo "# 3. After Prometheus install            | $TOTAL_AFTER_PROM" >> $logFile
+          echo "# 4. After Grafana install (final)       | $TOTAL_FINAL" >> $logFile
+          echo "#" >> $logFile
+          echo "# Cluster nodes: $NODE_FINAL" >> $logFile
+          echo "# Each DaemonSet (kube-proxy, node-exporter) adds 1 pod PER" >> $logFile
+          echo "# NODE. On a multi-node cluster this multiplies quickly even" >> $logFile
+          echo "# though only ~4 unique workloads were actually installed" >> $logFile
+          echo "# (app, prometheus-server, kube-state-metrics, grafana)." >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "" >> $logFile
 
       - name: 14. Export Real Grafana Dashboard JSON
         run: |
@@ -627,12 +712,24 @@ jobs:
           echo "# ============================================================" >> $obsFile
           echo "# Grafana Dashboard UID : cluster-status" >> $obsFile
           echo "# Grafana Admin URL     : http://localhost:3000" >> $obsFile
+          echo "# Grafana Import URL    : http://localhost:3000/dashboard/import" >> $obsFile
+          echo "#   -> Use 'Import via dashboard JSON model' box, paste the" >> $obsFile
+          echo "#      JSON from grafana-kubernetes-dashboard.json (or the" >> $obsFile
+          echo "#      block below) and click Load." >> $obsFile
           echo "# Prometheus URL        : http://prometheus-server.monitoring.svc.cluster.local:80" >> $obsFile
           echo "# Helm Releases Active  : $(helm list --all-namespaces --short 2>/dev/null | wc -l)" >> $obsFile
           echo "# Total Pods (all NS)   : $(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)" >> $obsFile
           echo "# Total Running Pods    : $(kubectl get pods --all-namespaces --no-headers 2>/dev/null | grep -c Running || echo 0)" >> $obsFile
           echo "# Total Nodes           : $(kubectl get nodes --no-headers 2>/dev/null | wc -l)" >> $obsFile
           echo "# Audit Completed At    : $(date -u) UTC" >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          echo "" >> $obsFile
+
+          echo "# ============================================================" >> $obsFile
+          echo "# DASHBOARD JSON (paste into Grafana Import URL above)        " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          cat grafana-kubernetes-dashboard.json >> $obsFile 2>/dev/null || true
+          echo "" >> $obsFile
           echo "# ============================================================" >> $obsFile
 
       - name: 17. Upload Real Deployment Artifacts (3 Files Only)
