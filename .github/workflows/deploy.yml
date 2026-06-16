@@ -293,20 +293,58 @@ jobs:
             echo "" >> $logFile
           done
 
-      - name: 11. Install Prometheus
+      - name: 10.6 Pod Inventory and Use-Case Breakdown
+        run: |
+          logFile="./helm-chart-output.yaml"
+          echo "# ============================================================" >> $logFile
+          echo "# POD INVENTORY (ALL NAMESPACES)                               " >> $logFile
+          echo "# ============================================================" >> $logFile
+          kubectl get pods --all-namespaces -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,STATUS:.status.phase,NODE:.spec.nodeName >> $logFile 2>&1 || true
+          echo "" >> $logFile
+          cat >> $logFile <<'EOF'
+          # ------------------------------------------------------------
+          # POD USE-CASE REFERENCE
+          # ------------------------------------------------------------
+          # Pod                       | Namespace   | Use Case
+          # --------------------------|-------------|------------------------------------
+          # kube-apiserver             kube-system   Cluster control plane API entrypoint
+          # etcd                       kube-system   Cluster state store
+          # kube-scheduler             kube-system   Schedules pods onto nodes
+          # kube-controller-manager    kube-system   Runs core K8s control loops
+          # coredns                    kube-system   In-cluster DNS resolution
+          # kube-proxy (DaemonSet)     kube-system   Per-node network routing rules
+          # storage-provisioner        kube-system   Dynamic PV provisioning (minikube)
+          # metrics-server             kube-system   Powers `kubectl top` and HPA metrics
+          # expo-web-deployment-*      default       Your application pod (frontend/web app)
+          # prometheus-server          monitoring    Scrapes and stores metrics, feeds Grafana
+          # grafana                    monitoring    Dashboard UI + alerting/email notifications
+          # ------------------------------------------------------------
+          # REMOVED (not required to run/view your app dashboard):
+          #   kube-state-metrics        - exposed K8s object-state metrics, unused by your panels
+          #   prometheus-node-exporter  - exposed per-node OS metrics, unused by your panels
+          # metrics-server is KEPT (powers kubectl top / your existing metrics sections).
+          # ------------------------------------------------------------
+          EOF
+          echo "" >> $logFile
+
+      - name: 11. Install Prometheus (Trimmed - Frontend Dashboard Only)
         run: |
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo add grafana https://grafana.github.io/helm-charts
           helm repo update
 
+          # kube-state-metrics and node-exporter removed: they feed metrics
+          # (kube_pod_status_phase per-object state, node-level OS stats) that
+          # your frontend dashboard panels (app pod CPU/memory) do not use.
+          # prometheus-server itself is kept since Grafana queries it directly.
           helm upgrade --install prometheus prometheus-community/prometheus \
             --namespace monitoring \
             --create-namespace \
             --set alertmanager.enabled=false \
             --set server.persistentVolume.enabled=false \
             --set pushgateway.enabled=false \
-            --set kube-state-metrics.enabled=true \
-            --set prometheus-node-exporter.enabled=true
+            --set kube-state-metrics.enabled=false \
+            --set prometheus-node-exporter.enabled=false
 
           kubectl rollout status deployment/prometheus-server -n monitoring --timeout=180s
 
@@ -316,8 +354,9 @@ jobs:
           echo "# ============================================================" >> $logFile
           echo "# PODS AFTER PROMETHEUS INSTALL (monitoring namespace)        " >> $logFile
           echo "# ============================================================" >> $logFile
-          echo "# Prometheus stack adds: prometheus-server, kube-state-metrics," >> $logFile
-          echo "# and a prometheus-node-exporter pod on EVERY node (DaemonSet)." >> $logFile
+          echo "# Trimmed install: only prometheus-server runs here now." >> $logFile
+          echo "# kube-state-metrics and node-exporter were not needed for" >> $logFile
+          echo "# the frontend app dashboard and have been removed." >> $logFile
           echo "" >> $logFile
           kubectl get pods -n monitoring -o wide >> $logFile 2>&1 || true
           PROM_STEP_COUNT=$(kubectl get pods -n monitoring --no-headers 2>/dev/null | wc -l)
@@ -347,7 +386,7 @@ jobs:
                 "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
                 "targets": [
                   {
-                    "expr": "count(kube_pod_status_phase{phase=\"Running\"})",
+                    "expr": "count(kube_pod_info)",
                     "legendFormat": "Running Pods",
                     "refId": "A"
                   }
@@ -361,36 +400,8 @@ jobs:
                 "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
                 "targets": [
                   {
-                    "expr": "count(up{job=~\".*node.*|.*kubernetes.*\"})",
+                    "expr": "count(up{job=~\".*kubernetes.*\"})",
                     "legendFormat": "Nodes",
-                    "refId": "A"
-                  }
-                ],
-                "datasource": { "type": "prometheus", "uid": "Prometheus" }
-              },
-              {
-                "id": 3,
-                "type": "timeseries",
-                "title": "Node CPU Usage %",
-                "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
-                "targets": [
-                  {
-                    "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
-                    "legendFormat": "{{instance}} CPU %",
-                    "refId": "A"
-                  }
-                ],
-                "datasource": { "type": "prometheus", "uid": "Prometheus" }
-              },
-              {
-                "id": 4,
-                "type": "timeseries",
-                "title": "Node Memory Usage %",
-                "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
-                "targets": [
-                  {
-                    "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
-                    "legendFormat": "{{instance}} Memory %",
                     "refId": "A"
                   }
                 ],
@@ -399,11 +410,11 @@ jobs:
               {
                 "id": 5,
                 "type": "timeseries",
-                "title": "Pod CPU Usage",
-                "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+                "title": "App Pod CPU Usage",
+                "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
                 "targets": [
                   {
-                    "expr": "sum by(namespace, pod) (rate(container_cpu_usage_seconds_total{container!=\"\", pod!=\"\"}[5m]))",
+                    "expr": "sum by(namespace, pod) (rate(container_cpu_usage_seconds_total{container!=\"\", pod!=\"\", namespace=\"default\"}[5m]))",
                     "legendFormat": "{{namespace}}/{{pod}}",
                     "refId": "A"
                   }
@@ -413,11 +424,11 @@ jobs:
               {
                 "id": 6,
                 "type": "timeseries",
-                "title": "Pod Memory Usage",
-                "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+                "title": "App Pod Memory Usage",
+                "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
                 "targets": [
                   {
-                    "expr": "sum by(namespace, pod) (container_memory_working_set_bytes{container!=\"\", pod!=\"\"})",
+                    "expr": "sum by(namespace, pod) (container_memory_working_set_bytes{container!=\"\", pod!=\"\", namespace=\"default\"})",
                     "legendFormat": "{{namespace}}/{{pod}}",
                     "refId": "A"
                   }
@@ -436,8 +447,71 @@ jobs:
           kubectl label configmap grafana-kubernetes-dashboard \
             -n monitoring grafana_dashboard=1 --overwrite
 
-      - name: 13. Install Grafana with Real Dashboard Provisioning
+      - name: 12.5 Provision Grafana Alert Rule + Email Contact Point
         run: |
+          # Pod-count threshold alert. Adjust the value 15 below to your
+          # actual desired pod limit for this cluster.
+          cat > alerting.yaml <<'EOF'
+          apiVersion: 1
+          contactPoints:
+            - orgId: 1
+              name: pod-limit-email
+              receivers:
+                - uid: pod-limit-email-receiver
+                  type: email
+                  settings:
+                    addresses: sujey.hariprasad@multicorewareinc.com
+                    singleEmail: true
+          policies:
+            - orgId: 1
+              receiver: pod-limit-email
+          groups:
+            - orgId: 1
+              name: pod-count-group
+              folder: General
+              interval: 1m
+              rules:
+                - uid: pod-count-limit
+                  title: Pod Count Exceeds Limit
+                  condition: C
+                  data:
+                    - refId: A
+                      datasourceUid: Prometheus
+                      relativeTimeRange:
+                        from: 60
+                        to: 0
+                      model:
+                        expr: count(kube_pod_info)
+                        instant: true
+                        refId: A
+                    - refId: C
+                      datasourceUid: "__expr__"
+                      model:
+                        type: threshold
+                        expression: A
+                        conditions:
+                          - evaluator:
+                              type: gt
+                              params: [15]
+                        refId: C
+                  noDataState: NoData
+                  execErrState: Alerting
+                  for: 1m
+                  annotations:
+                    summary: "Cluster pod count {{ $values.A }} exceeded the configured limit of 15"
+                  labels:
+                    severity: warning
+          EOF
+
+          kubectl create configmap grafana-alerting-provisioning \
+            -n monitoring \
+            --from-file=alerting.yaml \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: 13. Install Grafana with Real Dashboard Provisioning + Email Alerts
+        run: |
+          # NOTE: SMTP password is pulled from a GitHub secret, never hardcoded.
+          # Required secret: GRAFANA_SMTP_USER, GRAFANA_SMTP_PASSWORD
           helm upgrade --install grafana grafana/grafana \
             --namespace monitoring \
             --set persistence.enabled=false \
@@ -452,7 +526,18 @@ jobs:
             --set datasources."datasources\.yaml".datasources[0].type=prometheus \
             --set datasources."datasources\.yaml".datasources[0].url=http://prometheus-server.monitoring.svc.cluster.local:80 \
             --set datasources."datasources\.yaml".datasources[0].access=proxy \
-            --set datasources."datasources\.yaml".datasources[0].isDefault=true
+            --set datasources."datasources\.yaml".datasources[0].isDefault=true \
+            --set grafana\\.ini.smtp.enabled=true \
+            --set grafana\\.ini.smtp.host="smtp.gmail.com:587" \
+            --set grafana\\.ini.smtp.user="${{ secrets.GRAFANA_SMTP_USER }}" \
+            --set grafana\\.ini.smtp.password="${{ secrets.GRAFANA_SMTP_PASSWORD }}" \
+            --set grafana\\.ini.smtp.from_address="${{ secrets.GRAFANA_SMTP_USER }}" \
+            --set grafana\\.ini.smtp.from_name="Grafana Pod Alerts" \
+            --set "extraConfigmapMounts[0].name=alerting-provisioning" \
+            --set "extraConfigmapMounts[0].configMap=grafana-alerting-provisioning" \
+            --set "extraConfigmapMounts[0].mountPath=/etc/grafana/provisioning/alerting/alerting.yaml" \
+            --set "extraConfigmapMounts[0].subPath=alerting.yaml" \
+            --set "extraConfigmapMounts[0].readOnly=true"
 
           kubectl rollout status deployment/grafana -n monitoring --timeout=180s
 
@@ -479,14 +564,13 @@ jobs:
           echo "# ---------------------------------------|------------------" >> $logFile
           echo "# 1. Before app deploy (K8s baseline)    | $BEFORE_COUNT" >> $logFile
           echo "# 2. After app deploy (+your app pod)    | $AFTER_TOTAL" >> $logFile
-          echo "# 3. After Prometheus install            | $TOTAL_AFTER_PROM" >> $logFile
+          echo "# 3. After Prometheus install (trimmed)  | $TOTAL_AFTER_PROM" >> $logFile
           echo "# 4. After Grafana install (final)       | $TOTAL_FINAL" >> $logFile
           echo "#" >> $logFile
           echo "# Cluster nodes: $NODE_FINAL" >> $logFile
-          echo "# Each DaemonSet (kube-proxy, node-exporter) adds 1 pod PER" >> $logFile
-          echo "# NODE. On a multi-node cluster this multiplies quickly even" >> $logFile
-          echo "# though only ~4 unique workloads were actually installed" >> $logFile
-          echo "# (app, prometheus-server, kube-state-metrics, grafana)." >> $logFile
+          echo "# kube-state-metrics and node-exporter were removed since" >> $logFile
+          echo "# they are not used by the frontend app dashboard panels." >> $logFile
+          echo "# metrics-server was kept as requested." >> $logFile
           echo "# ============================================================" >> $logFile
           echo "" >> $logFile
 
@@ -583,9 +667,10 @@ jobs:
           echo "# ============================================================" >> $obsFile
           echo "# Status       : ACTIVE" >> $obsFile
           echo "# Namespace    : monitoring" >> $obsFile
-          echo "# Prometheus   : Installed" >> $obsFile
-          echo "# Grafana      : Installed" >> $obsFile
+          echo "# Prometheus   : Installed (trimmed - server only)" >> $obsFile
+          echo "# Grafana      : Installed (with email alerting)" >> $obsFile
           echo "# Dashboard    : Real Grafana Dashboard UID cluster-status" >> $obsFile
+          echo "# Alert Email  : sujey.hariprasad@multicorewareinc.com" >> $obsFile
           echo "# Generated At : $(date -u) UTC" >> $obsFile
           echo "# Commit SHA   : ${{ github.sha }}" >> $obsFile
           echo "# Docker Image : ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}" >> $obsFile
@@ -608,25 +693,21 @@ jobs:
           echo "# Cluster Nodes                         : $NODE_COUNT" >> $obsFile
           echo "#" >> $obsFile
           echo "# 1. kube-system pods (K8s control plane" >> $obsFile
-          echo "#    + kube-proxy/node-exporter DaemonSets," >> $obsFile
-          echo "#    multiplied by node count)            : $KUBE_SYSTEM_COUNT" >> $obsFile
+          echo "#    + kube-proxy DaemonSet + metrics-server)" >> $obsFile
+          echo "#                                          : $KUBE_SYSTEM_COUNT" >> $obsFile
           echo "#" >> $obsFile
           echo "# 2. App pods (default ns - Helm chart" >> $obsFile
           echo "#    'my-web-app' / expo-web-release)     : $DEFAULT_COUNT" >> $obsFile
           echo "#" >> $obsFile
-          echo "# 3. Monitoring namespace total           : $MONITORING_COUNT" >> $obsFile
-          echo "#      - Prometheus stack (server,        " >> $obsFile
-          echo "#        kube-state-metrics, node-exporter" >> $obsFile
-          echo "#        DaemonSet x nodes)                : $PROM_COUNT" >> $obsFile
-          echo "#      - Grafana                          : $GRAFANA_COUNT" >> $obsFile
+          echo "# 3. Monitoring namespace total (trimmed) : $MONITORING_COUNT" >> $obsFile
+          echo "#      - Prometheus server only            : $PROM_COUNT" >> $obsFile
+          echo "#      - Grafana (dashboard + email alerts) : $GRAFANA_COUNT" >> $obsFile
           echo "#" >> $obsFile
           echo "# TOTAL PODS RUNNING (all namespaces)     : $TOTAL_COUNT" >> $obsFile
           echo "" >> $obsFile
-          echo "# NOTE: Most of the count comes from K8s control-plane pods" >> $obsFile
-          echo "#       and DaemonSets (kube-proxy, node-exporter) which run" >> $obsFile
-          echo "#       ONCE PER NODE. With $NODE_COUNT nodes, each DaemonSet" >> $obsFile
-          echo "#       alone contributes $NODE_COUNT pods. Your actual app" >> $obsFile
-          echo "#       is only $DEFAULT_COUNT pod(s)." >> $obsFile
+          echo "# NOTE: kube-state-metrics and node-exporter were removed" >> $obsFile
+          echo "#       because they only fed metrics not used by the" >> $obsFile
+          echo "#       frontend app dashboard. metrics-server was kept." >> $obsFile
           echo "# ============================================================" >> $obsFile
           echo "" >> $obsFile
 
@@ -647,6 +728,13 @@ jobs:
           echo "# GRAFANA HEALTH CHECK                                         " >> $obsFile
           echo "# ============================================================" >> $obsFile
           curl -s http://localhost:3000/api/health >> $obsFile || true
+          echo "" >> $obsFile
+
+          # ---- GRAFANA ALERT RULE STATUS ----
+          echo "# ============================================================" >> $obsFile
+          echo "# GRAFANA ALERT RULE STATUS (pod-count-limit)                  " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          curl -s -u admin:admin http://localhost:3000/api/v1/provisioning/alert-rules >> $obsFile || true
           echo "" >> $obsFile
 
           # ---- REAL NODE METRICS WITH BARS ----
@@ -717,6 +805,8 @@ jobs:
           echo "#      JSON from grafana-kubernetes-dashboard.json (or the" >> $obsFile
           echo "#      block below) and click Load." >> $obsFile
           echo "# Prometheus URL        : http://prometheus-server.monitoring.svc.cluster.local:80" >> $obsFile
+          echo "# Alert Rule            : pod-count-limit (threshold > 15 pods)" >> $obsFile
+          echo "# Alert Notification    : sujey.hariprasad@multicorewareinc.com" >> $obsFile
           echo "# Helm Releases Active  : $(helm list --all-namespaces --short 2>/dev/null | wc -l)" >> $obsFile
           echo "# Total Pods (all NS)   : $(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)" >> $obsFile
           echo "# Total Running Pods    : $(kubectl get pods --all-namespaces --no-headers 2>/dev/null | grep -c Running || echo 0)" >> $obsFile

@@ -42,3 +42,8 @@ yarn-error.*
 
 #webhook
 local_settings.json
+
+# Pipeline Generated Compliance Reports
+helm-chart-output.yaml
+observability-audit-report.yaml
+rendered-manifest.yaml
