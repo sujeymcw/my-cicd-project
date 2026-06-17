@@ -1,906 +1,744 @@
 name: CICD Demo Pipeline
 
 on:
-  push:
-    branches:
-      - main
+  push:
+    branches:
+      - main
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: 1. Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: 2. Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
-
-      - name: 3. Build and Push Docker Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          no-cache: true
-          tags: ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}
-
-      - name: 4. Start Minikube Cluster
-        uses: medyagh/setup-minikube@master
-        with:
-          cache: true
-
-      - name: 5. Enable Metrics Server
-        run: |
-          minikube addons enable metrics-server
-
-          kubectl patch deployment metrics-server -n kube-system --type='json' \
-            -p='[
-              {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"},
-              {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname"}
-            ]' || true
-
-          kubectl rollout status deployment/metrics-server -n kube-system --timeout=180s || true
-
-          echo "Waiting for Metrics API to become ready..."
-          for i in {1..30}; do
-            if kubectl top nodes >/dev/null 2>&1; then
-              echo "Metrics API is ready."
-              break
-            fi
-            echo "Metrics API not ready yet. Attempt $i/30"
-            sleep 10
-          done
-
-      - name: 5.5 Snapshot - Pods BEFORE Application Deploy
-        run: |
-          logFile="./helm-chart-output.yaml"
-          echo "# ============================================================" > $logFile
-          echo "#           AUTOMATED DEVOPS HELM DEPLOYMENT REPORT           " >> $logFile
-          echo "# ============================================================" >> $logFile
-          echo "# Generated At : $(date -u) UTC" >> $logFile
-          echo "# Commit SHA   : ${{ github.sha }}" >> $logFile
-          echo "# Docker Image : ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}" >> $logFile
-          echo "# Namespace    : default" >> $logFile
-          echo "# ============================================================" >> $logFile
-          echo "" >> $logFile
-
-          echo "# ============================================================" >> $logFile
-          echo "# PODS BEFORE APP DEPLOY (cluster baseline - kube-system etc) " >> $logFile
-          echo "# ============================================================" >> $logFile
-          echo "# These pods exist purely because Kubernetes itself needs them" >> $logFile
-          echo "# to run (control plane: etcd, apiserver, scheduler, controller-" >> $logFile
-          echo "# manager, coredns, kube-proxy, storage-provisioner, metrics-" >> $logFile
-          echo "# server). This is the minimum baseline on ANY cluster, before" >> $logFile
-          echo "# your application or any monitoring tools are deployed." >> $logFile
-          echo "" >> $logFile
-          kubectl get pods --all-namespaces -o wide >> $logFile 2>&1 || true
-          BEFORE_COUNT=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
-          echo "BEFORE_COUNT=$BEFORE_COUNT" > /tmp/podcounts.env
-          echo "" >> $logFile
-          echo "# Total pods BEFORE app deploy (baseline) : $BEFORE_COUNT" >> $logFile
-          echo "" >> $logFile
-
-      - name: 6. Install Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: v3.12.0
-
-      - name: 8. Render Helm Manifest (Summary Only)
-        run: |
-          logFile="./helm-chart-output.yaml"
-          helm template expo-web-release ./charts/my-web-app \
-            --set image.repository="${{ secrets.REGISTRY_USERNAME }}/expo-web-app" \
-            --set image.tag="${{ github.sha }}" \
-            --set image.imagePullPolicy="IfNotPresent" \
-            --set service.type="LoadBalancer" \
-            --set service.port=80 \
-            --namespace default > /tmp/rendered-manifest.yaml 2>&1
-
-          echo "# ============================================================" >> $logFile
-          echo "# HELM RENDERED MANIFEST - RESOURCE SUMMARY                   " >> $logFile
-          echo "# ============================================================" >> $logFile
-          echo "# Total resources rendered: $(grep -c '^kind:' /tmp/rendered-manifest.yaml || echo 0)" >> $logFile
-          echo "" >> $logFile
-          echo "# Resource Kind | Name" >> $logFile
-          paste <(grep '^kind:' /tmp/rendered-manifest.yaml) <(grep '^  name:' /tmp/rendered-manifest.yaml) | sed 's/kind:/  -/' >> $logFile 2>&1 || true
-          echo "" >> $logFile
-
-      - name: 9. Deploy Application with Helm
-        run: |
-          helm upgrade --install expo-web-release ./charts/my-web-app \
-            --set image.repository="${{ secrets.REGISTRY_USERNAME }}/expo-web-app" \
-            --set image.tag="${{ github.sha }}" \
-            --set image.imagePullPolicy="IfNotPresent" \
-            --set service.type="LoadBalancer" \
-            --set service.port=80 \
-            --namespace default
-
-      - name: 9.5 Snapshot - Pods DURING/AFTER Rollout
-        run: |
-          logFile="./helm-chart-output.yaml"
-
-          echo "Waiting for app pod to become Ready before snapshotting..."
-          kubectl rollout status deployment/expo-web-deployment -n default --timeout=120s || true
-
-          echo "# ============================================================" >> $logFile
-          echo "# PODS AFTER APP DEPLOY (default namespace)                   " >> $logFile
-          echo "# ============================================================" >> $logFile
-          echo "# This is the application pod created by the Helm chart" >> $logFile
-          echo "# 'my-web-app'. Compare to the baseline above - this is the" >> $logFile
-          echo "# ONLY pod added by your actual application." >> $logFile
-          echo "" >> $logFile
-          kubectl get pods -n default -o wide >> $logFile 2>&1 || true
-          ROLLOUT_COUNT=$(kubectl get pods -n default --no-headers 2>/dev/null | wc -l)
-          AFTER_TOTAL=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
-          echo "AFTER_TOTAL=$AFTER_TOTAL" >> /tmp/podcounts.env
-          echo "" >> $logFile
-          echo "# Pods created by this Helm release (default ns) : $ROLLOUT_COUNT" >> $logFile
-          echo "# Total pods across cluster after app deploy     : $AFTER_TOTAL" >> $logFile
-          echo "# Net new pods added by app deploy (after - before baseline) : $ROLLOUT_COUNT" >> $logFile
-          echo "" >> $logFile
-
-      - name: 10. Verify Application Rollout (Minimised)
-        run: |
-          logFile="./helm-chart-output.yaml"
-
-          echo "# ============================================================" >> $logFile
-          echo "# KUBERNETES DEPLOYMENT STATUS                                " >> $logFile
-          echo "# ============================================================" >> $logFile
-          echo "" >> $logFile
-
-          echo "# --- DEPLOYMENTS (default namespace) ---" >> $logFile
-          kubectl get deployments -n default -o wide >> $logFile 2>&1 || true
-          echo "" >> $logFile
-
-          echo "# --- PODS (default namespace) ---" >> $logFile
-          kubectl get pods -n default -o wide >> $logFile 2>&1 || true
-          echo "" >> $logFile
-
-          echo "# --- SERVICES (default namespace) ---" >> $logFile
-          kubectl get svc -n default -o wide >> $logFile 2>&1 || true
-          echo "" >> $logFile
-
-          echo "# --- NODES (cluster-wide) ---" >> $logFile
-          kubectl get nodes -o wide >> $logFile 2>&1 || true
-          echo "" >> $logFile
-
-      - name: 10.5 Capture Real Pod and Node Metrics with Visual Bars
-        run: |
-          logFile="./helm-chart-output.yaml"
-
-          # ---- Helper: ASCII bar generator ----
-          ascii_bar() {
-            local val=$1
-            local max=$2
-            local width=${3:-40}
-            if [ "$max" -eq 0 ]; then max=1; fi
-            local filled=$(( val * width / max ))
-            local empty=$(( width - filled ))
-            local bar=""
-            for i in $(seq 1 $filled); do bar="${bar}#"; done
-            for i in $(seq 1 $empty); do bar="${bar}-"; done
-            echo "[${bar}] ${val}/${max}"
-          }
-
-          parse_cpu_m() {
-            local raw=$1
-            if echo "$raw" | grep -q 'm'; then
-              echo "$raw" | tr -d 'm'
-            else
-              echo $(( ${raw} * 1000 ))
-            fi
-          }
-
-          parse_mem_mi() {
-            local raw=$1
-            if echo "$raw" | grep -q 'Gi'; then
-              echo $(( $(echo "$raw" | tr -d 'Gi') * 1024 ))
-            elif echo "$raw" | grep -q 'Mi'; then
-              echo "$raw" | tr -d 'Mi'
-            elif echo "$raw" | grep -q 'Ki'; then
-              echo $(( $(echo "$raw" | tr -d 'Ki') / 1024 ))
-            else
-              echo "$raw"
-            fi
-          }
-
-          echo "# ============================================================" >> $logFile
-          echo "# NODE METRICS (CPU=millicores/2000m max  MEM=MiB/3800MiB max)" >> $logFile
-          echo "# ============================================================" >> $logFile
-
-          NODE_RAW=$(kubectl top nodes 2>&1 || true)
-          echo "$NODE_RAW" >> $logFile
-          echo "" >> $logFile
-
-          echo "$NODE_RAW" | tail -n +2 | while read -r line; do
-            NODE_NAME=$(echo "$line" | awk '{print $1}')
-            CPU_RAW=$(echo "$line"  | awk '{print $2}')
-            MEM_RAW=$(echo "$line"  | awk '{print $4}')
-            if [ -z "$NODE_NAME" ] || [ "$NODE_NAME" = "NAME" ]; then continue; fi
-            CPU_M=$(parse_cpu_m "$CPU_RAW")
-            MEM_MI=$(parse_mem_mi "$MEM_RAW")
-            CPU_BAR=$(ascii_bar ${CPU_M:-0} 2000 40)
-            MEM_BAR=$(ascii_bar ${MEM_MI:-0} 3800 40)
-            echo "  Node     : $NODE_NAME" >> $logFile
-            echo "  CPU      : $CPU_RAW  $CPU_BAR" >> $logFile
-            echo "  Memory   : $MEM_RAW  $MEM_BAR" >> $logFile
-            echo "" >> $logFile
-          done
-
-          echo "# ============================================================" >> $logFile
-          echo "# POD METRICS - DEFAULT NAMESPACE (CPU=millicores/1000m  MEM=MiB/512MiB)" >> $logFile
-          echo "# ============================================================" >> $logFile
-          echo "# NOTE: metrics-server needs ~15-30s of pod runtime before it" >> $logFile
-          echo "# has scrape data. We retry below to avoid 'metrics not" >> $logFile
-          echo "# available yet' errors on freshly-created pods." >> $logFile
-          echo "" >> $logFile
-
-          echo "Waiting for pod metrics to become available..."
-          for i in {1..12}; do
-            if kubectl top pods -n default >/dev/null 2>&1; then
-              echo "Pod metrics ready."
-              break
-            fi
-            echo "Pod metrics not ready yet. Attempt $i/12"
-            sleep 10
-          done
-
-          POD_DEFAULT_RAW=$(kubectl top pods -n default 2>&1 || true)
-          echo "$POD_DEFAULT_RAW" >> $logFile
-          echo "" >> $logFile
-
-          echo "$POD_DEFAULT_RAW" | tail -n +2 | while read -r line; do
-            POD_NAME=$(echo "$line" | awk '{print $1}')
-            CPU_RAW=$(echo "$line"  | awk '{print $2}')
-            MEM_RAW=$(echo "$line"  | awk '{print $3}')
-            if [ -z "$POD_NAME" ] || [ "$POD_NAME" = "NAME" ]; then continue; fi
-            CPU_M=$(parse_cpu_m "$CPU_RAW")
-            MEM_MI=$(parse_mem_mi "$MEM_RAW")
-            CPU_BAR=$(ascii_bar ${CPU_M:-0} 1000 40)
-            MEM_BAR=$(ascii_bar ${MEM_MI:-0} 512 40)
-            echo "  Pod      : $POD_NAME" >> $logFile
-            echo "  CPU      : $CPU_RAW  $CPU_BAR" >> $logFile
-            echo "  Memory   : $MEM_RAW  $MEM_BAR" >> $logFile
-            echo "" >> $logFile
-          done
-
-          echo "# ============================================================" >> $logFile
-          echo "# POD METRICS - ALL NAMESPACES (CPU=millicores/1000m  MEM=MiB/512MiB)" >> $logFile
-          echo "# ============================================================" >> $logFile
-
-          POD_ALL_RAW=$(kubectl top pods --all-namespaces 2>&1 || true)
-          echo "$POD_ALL_RAW" >> $logFile
-          echo "" >> $logFile
-
-          echo "$POD_ALL_RAW" | tail -n +2 | while read -r line; do
-            NS=$(echo "$line"       | awk '{print $1}')
-            POD_NAME=$(echo "$line" | awk '{print $2}')
-            CPU_RAW=$(echo "$line"  | awk '{print $3}')
-            MEM_RAW=$(echo "$line"  | awk '{print $4}')
-            if [ -z "$POD_NAME" ] || [ "$POD_NAME" = "NAME" ]; then continue; fi
-            CPU_M=$(parse_cpu_m "$CPU_RAW")
-            MEM_MI=$(parse_mem_mi "$MEM_RAW")
-            CPU_BAR=$(ascii_bar ${CPU_M:-0} 1000 40)
-            MEM_BAR=$(ascii_bar ${MEM_MI:-0} 512 40)
-            echo "  Namespace: $NS" >> $logFile
-            echo "  Pod      : $POD_NAME" >> $logFile
-            echo "  CPU      : $CPU_RAW  $CPU_BAR" >> $logFile
-            echo "  Memory   : $MEM_RAW  $MEM_BAR" >> $logFile
-            echo "" >> $logFile
-          done
-
-      - name: 10.6 Pod Inventory and Use-Case Breakdown
-        run: |
-          logFile="./helm-chart-output.yaml"
-
-          # ---- Use-case lookup: maps pod name prefix -> description ----
-          # Each running pod is matched against known prefixes in order.
-          # The first match wins. Unknown pods fall through to "Unknown".
-          get_pod_usecase() {
-            local name="$1"
-            local ns="$2"
-            case "$name" in
-              kube-apiserver*)          echo "Control plane API entrypoint — all kubectl/API calls go here" ;;
-              etcd*)                    echo "Cluster state store — holds all K8s object definitions" ;;
-              kube-scheduler*)          echo "Schedules pods onto nodes based on resource availability" ;;
-              kube-controller-manager*) echo "Runs core K8s control loops (deployments, replicasets, etc.)" ;;
-              coredns*)                 echo "In-cluster DNS — resolves service names to ClusterIPs" ;;
-              kube-proxy*)              echo "Per-node iptables/ipvs rules for Service routing (DaemonSet)" ;;
-              storage-provisioner*)     echo "Dynamic PersistentVolume provisioning (minikube built-in)" ;;
-              metrics-server*)          echo "Powers kubectl top and HPA autoscaling metrics" ;;
-              expo-web-deployment*)     echo "YOUR APP — Expo/React web frontend served via Helm chart" ;;
-              prometheus-server*)       echo "Scrapes and stores metrics; Grafana queries this directly" ;;
-              grafana*)                 echo "Dashboard UI — visualises Prometheus metrics in-browser" ;;
-              *)                        echo "Unknown — review this pod manually" ;;
-            esac
-          }
-
-          echo "# ============================================================" >> $logFile
-          echo "# POD INVENTORY WITH USE-CASE ANNOTATIONS (ALL NAMESPACES)    " >> $logFile
-          echo "# ============================================================" >> $logFile
-          echo "# Each pod currently running in the cluster is listed below   " >> $logFile
-          echo "# with its namespace, status, and a plain-English explanation " >> $logFile
-          echo "# of what it does and whether it is required.                 " >> $logFile
-          echo "# ============================================================" >> $logFile
-          echo "" >> $logFile
-
-          printf "# %-52s %-12s %-8s  %s\n" "POD NAME" "NAMESPACE" "STATUS" "USE CASE" >> $logFile
-          printf "# %-52s %-12s %-8s  %s\n" "$(printf '%0.s-' {1..52})" "$(printf '%0.s-' {1..12})" "--------" "$(printf '%0.s-' {1..50})" >> $logFile
-
-          kubectl get pods --all-namespaces --no-headers \
-            -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,STATUS:.status.phase \
-            2>/dev/null | while read -r ns name status; do
-              usecase=$(get_pod_usecase "$name" "$ns")
-              printf "# %-52s %-12s %-8s  %s\n" "$name" "$ns" "${status:-Unknown}" "$usecase" >> $logFile
-          done
-
-          echo "" >> $logFile
-
-          # ---- Required vs optional summary ----
-          cat >> $logFile <<'LEGEND'
-          # ============================================================
-          # REQUIRED / OPTIONAL CLASSIFICATION
-          # ============================================================
-          #
-          # REQUIRED (cluster cannot function without these):
-          #   kube-apiserver          kube-system   Hard required
-          #   etcd                    kube-system   Hard required
-          #   kube-scheduler          kube-system   Hard required
-          #   kube-controller-manager kube-system   Hard required
-          #   coredns                 kube-system   Hard required (DNS)
-          #   kube-proxy              kube-system   Hard required (DaemonSet, 1 per node)
-          #   storage-provisioner     kube-system   Required for PVC-backed apps (minikube)
-          #   metrics-server          kube-system   Required — powers kubectl top and HPA
-          #
-          # YOUR APPLICATION:
-          #   expo-web-deployment-*   default       Required — this is your deployed app
-          #
-          # MONITORING (kept, used by Grafana dashboard):
-          #   prometheus-server       monitoring    Required — Grafana queries this for metrics
-          #   grafana                 monitoring    Required — provides the live dashboard UI
-          #
-          # REMOVED (not needed for this setup):
-          #   kube-state-metrics      monitoring    REMOVED — only feeds K8s object-state
-          #                                         metrics unused by current dashboard panels
-          #   prometheus-node-exporter monitoring   REMOVED — only feeds per-node OS metrics
-          #                                         unused by current dashboard panels
-          #
-          # NET RESULT: every pod currently running is necessary.
-          # No further reductions are possible without losing functionality.
-          # ============================================================
-          LEGEND
-          echo "" >> $logFile
-
-      - name: 11. Install Prometheus (kube-state-metrics + cAdvisor scraping)
-        run: |
-          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-          helm repo add grafana https://grafana.github.io/helm-charts
-          helm repo update
-
-          # kube-state-metrics RESTORED: required for kube_pod_info metric
-          # which powers the "Running Pods" stat panel in Grafana.
-          #
-          # cAdvisor scrape job ADDED via prometheus-values.yaml: required for
-          # container_cpu_usage_seconds_total and container_memory_working_set_bytes
-          # which power the "App Pod CPU Usage" and "App Pod Memory Usage" panels.
-          #
-          # node-exporter kept disabled: no dashboard panel uses it.
-          # alertmanager/pushgateway kept disabled: not needed.
-
-          cat > /tmp/prometheus-values.yaml <<'PROMEOF'
-          alertmanager:
-            enabled: false
-          pushgateway:
-            enabled: false
-          server:
-            persistentVolume:
-              enabled: false
-          kube-state-metrics:
-            enabled: true
-          prometheus-node-exporter:
-            enabled: false
-          serverFiles:
-            prometheus.yml:
-              scrape_configs:
-                - job_name: prometheus
-                  static_configs:
-                    - targets:
-                        - localhost:9090
-
-                - job_name: kubernetes-nodes-cadvisor
-                  scheme: https
-                  tls_config:
-                    ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-                    insecure_skip_verify: true
-                  bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-                  kubernetes_sd_configs:
-                    - role: node
-                  relabel_configs:
-                    - action: labelmap
-                      regex: __meta_kubernetes_node_label_(.+)
-                    - target_label: __address__
-                      replacement: kubernetes.default.svc:443
-                    - source_labels: [__meta_kubernetes_node_name]
-                      regex: (.+)
-                      target_label: __metrics_path__
-                      replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
-
-                - job_name: kubernetes-service-endpoints
-                  kubernetes_sd_configs:
-                    - role: endpoints
-                  relabel_configs:
-                    - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
-                      action: keep
-                      regex: "true"
-          PROMEOF
-
-          helm upgrade --install prometheus prometheus-community/prometheus \
-            --namespace monitoring \
-            --create-namespace \
-            -f /tmp/prometheus-values.yaml
-
-          kubectl rollout status deployment/prometheus-server -n monitoring --timeout=180s
-
-          # Wait for kube-state-metrics to be ready (needed for kube_pod_info)
-          kubectl rollout status deployment/prometheus-kube-state-metrics -n monitoring --timeout=120s || true
-
-          echo "Waiting for Prometheus to scrape kube-state-metrics..."
-          for i in {1..20}; do
-            kubectl port-forward -n monitoring svc/prometheus-server 9090:80 \
-              > /tmp/pf-prom.log 2>&1 &
-            PF_PID=$!
-            sleep 4
-            RESULT=$(curl -s "http://localhost:9090/api/v1/query?query=count(kube_pod_info)" \
-              2>/dev/null | grep -c '"value"' || echo 0)
-            kill $PF_PID 2>/dev/null || true
-            if [ "$RESULT" -gt 0 ]; then
-              echo "kube_pod_info metric is available — Prometheus scraping correctly."
-              break
-            fi
-            echo "kube_pod_info not yet available. Attempt $i/20"
-            sleep 10
-          done
-
-      - name: 11.5 Snapshot - Pods AFTER Prometheus Install
-        run: |
-          logFile="./helm-chart-output.yaml"
-          echo "# ============================================================" >> $logFile
-          echo "# PODS AFTER PROMETHEUS INSTALL (monitoring namespace)        " >> $logFile
-          echo "# ============================================================" >> $logFile
-          echo "# Trimmed install: only prometheus-server runs here now." >> $logFile
-          echo "# kube-state-metrics and node-exporter were not needed for" >> $logFile
-          echo "# the frontend app dashboard and have been removed." >> $logFile
-          echo "" >> $logFile
-          kubectl get pods -n monitoring -o wide >> $logFile 2>&1 || true
-          PROM_STEP_COUNT=$(kubectl get pods -n monitoring --no-headers 2>/dev/null | wc -l)
-          TOTAL_AFTER_PROM=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
-          echo "TOTAL_AFTER_PROM=$TOTAL_AFTER_PROM" >> /tmp/podcounts.env
-          echo "" >> $logFile
-          echo "# Pods in monitoring ns after Prometheus install : $PROM_STEP_COUNT" >> $logFile
-          echo "# Total pods across cluster after Prometheus     : $TOTAL_AFTER_PROM" >> $logFile
-          echo "" >> $logFile
-
-      - name: 12. Create Real Grafana Dashboard ConfigMap
-        run: |
-          cat > grafana-kubernetes-dashboard.json <<'EOF'
-          {
-            "uid": "cluster-status",
-            "title": "Kubernetes Cluster Live Dashboard",
-            "tags": ["kubernetes", "prometheus", "devops"],
-            "timezone": "browser",
-            "schemaVersion": 39,
-            "version": 1,
-            "refresh": "10s",
-            "panels": [
-              {
-                "id": 1,
-                "type": "stat",
-                "title": "Running Pods",
-                "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
-                "targets": [
-                  {
-                    "expr": "count(kube_pod_info)",
-                    "legendFormat": "Running Pods",
-                    "refId": "A"
-                  }
-                ],
-                "datasource": { "type": "prometheus", "uid": "Prometheus" }
-              },
-              {
-                "id": 2,
-                "type": "stat",
-                "title": "Cluster Nodes",
-                "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
-                "targets": [
-                  {
-                    "expr": "count(up{job=~\".*kubernetes.*\"})",
-                    "legendFormat": "Nodes",
-                    "refId": "A"
-                  }
-                ],
-                "datasource": { "type": "prometheus", "uid": "Prometheus" }
-              },
-              {
-                "id": 5,
-                "type": "timeseries",
-                "title": "App Pod CPU Usage",
-                "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
-                "targets": [
-                  {
-                    "expr": "sum by(namespace, pod) (rate(container_cpu_usage_seconds_total{container!=\"\", pod!=\"\", namespace=\"default\"}[5m]))",
-                    "legendFormat": "{{namespace}}/{{pod}}",
-                    "refId": "A"
-                  }
-                ],
-                "datasource": { "type": "prometheus", "uid": "Prometheus" }
-              },
-              {
-                "id": 6,
-                "type": "timeseries",
-                "title": "App Pod Memory Usage",
-                "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
-                "targets": [
-                  {
-                    "expr": "sum by(namespace, pod) (container_memory_working_set_bytes{container!=\"\", pod!=\"\", namespace=\"default\"})",
-                    "legendFormat": "{{namespace}}/{{pod}}",
-                    "refId": "A"
-                  }
-                ],
-                "datasource": { "type": "prometheus", "uid": "Prometheus" }
-              }
-            ]
-          }
-          EOF
-
-          kubectl create configmap grafana-kubernetes-dashboard \
-            -n monitoring \
-            --from-file=grafana-kubernetes-dashboard.json \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-          kubectl label configmap grafana-kubernetes-dashboard \
-            -n monitoring grafana_dashboard=1 --overwrite
-
-      - name: 13. Install Grafana with Dashboard Provisioning
-        run: |
-          # NOTE: Grafana alert/email provisioning has been removed from this step.
-          # Alerting is handled externally via ship.ps1 (Slack + Outlook).
-          # SMTP secrets (GRAFANA_SMTP_USER, GRAFANA_SMTP_PASSWORD) are no longer required.
-          helm upgrade --install grafana grafana/grafana \
-            --namespace monitoring \
-            --set persistence.enabled=false \
-            --set adminUser=admin \
-            --set adminPassword=admin \
-            --set sidecar.dashboards.enabled=true \
-            --set sidecar.dashboards.label=grafana_dashboard \
-            --set sidecar.dashboards.folder=/tmp/dashboards \
-            --set datasources."datasources\.yaml".apiVersion=1 \
-            --set datasources."datasources\.yaml".datasources[0].name=Prometheus \
-            --set datasources."datasources\.yaml".datasources[0].uid=Prometheus \
-            --set datasources."datasources\.yaml".datasources[0].type=prometheus \
-            --set datasources."datasources\.yaml".datasources[0].url=http://prometheus-server.monitoring.svc.cluster.local:80 \
-            --set datasources."datasources\.yaml".datasources[0].access=proxy \
-            --set datasources."datasources\.yaml".datasources[0].isDefault=true
-
-          kubectl rollout status deployment/grafana -n monitoring --timeout=180s
-
-      - name: 13.5 Snapshot - Pods AFTER Grafana Install (Final Summary)
-        run: |
-          logFile="./helm-chart-output.yaml"
-          source /tmp/podcounts.env || true
-          echo "# ============================================================" >> $logFile
-          echo "# PODS AFTER GRAFANA INSTALL (monitoring namespace)           " >> $logFile
-          echo "# ============================================================" >> $logFile
-          kubectl get pods -n monitoring -o wide >> $logFile 2>&1 || true
-          MONITORING_FINAL=$(kubectl get pods -n monitoring --no-headers 2>/dev/null | wc -l)
-          TOTAL_FINAL=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
-          NODE_FINAL=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
-          echo "" >> $logFile
-          echo "# Pods in monitoring ns after Grafana install : $MONITORING_FINAL" >> $logFile
-          echo "# Total pods across cluster (final)           : $TOTAL_FINAL" >> $logFile
-          echo "" >> $logFile
-
-          echo "# ============================================================" >> $logFile
-          echo "# POD COUNT PROGRESSION SUMMARY (per pipeline step)           " >> $logFile
-          echo "# ============================================================" >> $logFile
-          echo "# Stage                                  | Pods (cumulative)" >> $logFile
-          echo "# ---------------------------------------|------------------" >> $logFile
-          echo "# 1. Before app deploy (K8s baseline)    | $BEFORE_COUNT" >> $logFile
-          echo "# 2. After app deploy (+your app pod)    | $AFTER_TOTAL" >> $logFile
-          echo "# 3. After Prometheus install (trimmed)  | $TOTAL_AFTER_PROM" >> $logFile
-          echo "# 4. After Grafana install (final)       | $TOTAL_FINAL" >> $logFile
-          echo "#" >> $logFile
-          echo "# Cluster nodes: $NODE_FINAL" >> $logFile
-          echo "# kube-state-metrics and node-exporter were removed since" >> $logFile
-          echo "# they are not used by the frontend app dashboard panels." >> $logFile
-          echo "# metrics-server was kept as requested." >> $logFile
-          echo "# Grafana alert provisioning removed — notifications handled" >> $logFile
-          echo "# externally by ship.ps1 (Slack + Outlook)." >> $logFile
-          echo "# ============================================================" >> $logFile
-          echo "" >> $logFile
-
-      - name: 14. Export Real Grafana Dashboard JSON
-        run: |
-          sleep 45
-
-          kubectl port-forward -n monitoring svc/grafana 3000:80 > /tmp/grafana-port-forward.log 2>&1 &
-          echo $! > /tmp/grafana-port-forward.pid
-          sleep 10
-
-          curl -s -u admin:admin \
-            http://localhost:3000/api/dashboards/uid/cluster-status \
-            -o grafana-native-dashboard.json
-
-          test -s grafana-native-dashboard.json
-
-      - name: 15. Capture Actual Grafana Dashboard Screenshot
-        run: |
-          npm init -y
-          npm install playwright
-          npx playwright install --with-deps chromium
-
-          cat > capture-grafana.js <<'EOF'
-          const { chromium } = require('playwright');
-
-          (async () => {
-            const browser = await chromium.launch();
-            const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
-
-            await page.goto('http://localhost:3000/login', { waitUntil: 'networkidle' });
-            await page.fill('input[name="user"]', 'admin');
-            await page.fill('input[name="password"]', 'admin');
-            await page.click('button[type="submit"]');
-            await page.waitForTimeout(5000);
-
-            await page.goto('http://localhost:3000/d/cluster-status/kubernetes-cluster-live-dashboard?orgId=1&refresh=10s', {
-              waitUntil: 'networkidle'
-            });
-
-            await page.waitForTimeout(15000);
-            await page.screenshot({
-              path: 'actual-grafana-dashboard.png',
-              fullPage: true
-            });
-
-            await browser.close();
-          })();
-          EOF
-
-          node capture-grafana.js
-
-      - name: 16. Create Observability Audit Report (with Pod Classification)
-        run: |
-          obsFile="./observability-audit-report.yaml"
-
-          ascii_bar() {
-            local val=$1
-            local max=$2
-            local width=${3:-40}
-            if [ "$max" -eq 0 ]; then max=1; fi
-            local filled=$(( val * width / max ))
-            local empty=$(( width - filled ))
-            local bar=""
-            for i in $(seq 1 $filled); do bar="${bar}#"; done
-            for i in $(seq 1 $empty); do bar="${bar}-"; done
-            echo "[${bar}] ${val}/${max}"
-          }
-
-          parse_cpu_m() {
-            local raw=$1
-            if echo "$raw" | grep -q 'm'; then
-              echo "$raw" | tr -d 'm'
-            else
-              echo $(( ${raw} * 1000 ))
-            fi
-          }
-
-          parse_mem_mi() {
-            local raw=$1
-            if echo "$raw" | grep -q 'Gi'; then
-              echo $(( $(echo "$raw" | tr -d 'Gi') * 1024 ))
-            elif echo "$raw" | grep -q 'Mi'; then
-              echo "$raw" | tr -d 'Mi'
-            elif echo "$raw" | grep -q 'Ki'; then
-              echo $(( $(echo "$raw" | tr -d 'Ki') / 1024 ))
-            else
-              echo "$raw"
-            fi
-          }
-
-          echo "# ============================================================" > $obsFile
-          echo "#       KUBERNETES OBSERVABILITY STACK AUDIT REPORT           " >> $obsFile
-          echo "# ============================================================" >> $obsFile
-          echo "# Status       : ACTIVE" >> $obsFile
-          echo "# Namespace    : monitoring" >> $obsFile
-          echo "# Prometheus   : Installed (trimmed - server only)" >> $obsFile
-          echo "# Grafana      : Installed (dashboard provisioning only)" >> $obsFile
-          echo "# Alerting     : Handled externally by ship.ps1 (Slack + Outlook)" >> $obsFile
-          echo "# Dashboard    : Real Grafana Dashboard UID cluster-status" >> $obsFile
-          echo "# Generated At : $(date -u) UTC" >> $obsFile
-          echo "# Commit SHA   : ${{ github.sha }}" >> $obsFile
-          echo "# Docker Image : ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}" >> $obsFile
-          echo "# ============================================================" >> $obsFile
-          echo "" >> $obsFile
-
-          # ---- POD CLASSIFICATION SUMMARY ----
-          echo "# ============================================================" >> $obsFile
-          echo "# POD CLASSIFICATION SUMMARY                                   " >> $obsFile
-          echo "# ============================================================" >> $obsFile
-
-          KUBE_SYSTEM_COUNT=$(kubectl get pods -n kube-system --no-headers 2>/dev/null | wc -l)
-          DEFAULT_COUNT=$(kubectl get pods -n default --no-headers 2>/dev/null | wc -l)
-          MONITORING_COUNT=$(kubectl get pods -n monitoring --no-headers 2>/dev/null | wc -l)
-          PROM_COUNT=$(kubectl get pods -n monitoring -l app.kubernetes.io/instance=prometheus --no-headers 2>/dev/null | wc -l)
-          GRAFANA_COUNT=$(kubectl get pods -n monitoring -l app.kubernetes.io/instance=grafana --no-headers 2>/dev/null | wc -l)
-          TOTAL_COUNT=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
-          NODE_COUNT=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
-
-          echo "# Cluster Nodes                         : $NODE_COUNT" >> $obsFile
-          echo "#" >> $obsFile
-          echo "# 1. kube-system pods (K8s control plane" >> $obsFile
-          echo "#    + kube-proxy DaemonSet + metrics-server)" >> $obsFile
-          echo "#                                          : $KUBE_SYSTEM_COUNT" >> $obsFile
-          echo "#" >> $obsFile
-          echo "# 2. App pods (default ns - Helm chart" >> $obsFile
-          echo "#    'my-web-app' / expo-web-release)     : $DEFAULT_COUNT" >> $obsFile
-          echo "#" >> $obsFile
-          echo "# 3. Monitoring namespace total (trimmed) : $MONITORING_COUNT" >> $obsFile
-          echo "#      - Prometheus server only            : $PROM_COUNT" >> $obsFile
-          echo "#      - Grafana (dashboard only)          : $GRAFANA_COUNT" >> $obsFile
-          echo "#" >> $obsFile
-          echo "# TOTAL PODS RUNNING (all namespaces)     : $TOTAL_COUNT" >> $obsFile
-          echo "" >> $obsFile
-          echo "# NOTE: kube-state-metrics and node-exporter were removed" >> $obsFile
-          echo "#       because they only fed metrics not used by the" >> $obsFile
-          echo "#       frontend app dashboard. metrics-server was kept." >> $obsFile
-          echo "#       Grafana alert provisioning removed — ship.ps1 handles" >> $obsFile
-          echo "#       Slack and Outlook notifications post-pipeline." >> $obsFile
-          echo "# ============================================================" >> $obsFile
-          echo "" >> $obsFile
-
-          # ---- MONITORING STACK ----
-          echo "# ============================================================" >> $obsFile
-          echo "# MONITORING NAMESPACE - PODS                                  " >> $obsFile
-          echo "# ============================================================" >> $obsFile
-          kubectl get pods -n monitoring -o wide >> $obsFile 2>&1 || true
-          echo "" >> $obsFile
-
-          echo "# ============================================================" >> $obsFile
-          echo "# MONITORING NAMESPACE - SERVICES                              " >> $obsFile
-          echo "# ============================================================" >> $obsFile
-          kubectl get svc -n monitoring -o wide >> $obsFile 2>&1 || true
-          echo "" >> $obsFile
-
-          echo "# ============================================================" >> $obsFile
-          echo "# GRAFANA HEALTH CHECK                                         " >> $obsFile
-          echo "# ============================================================" >> $obsFile
-          curl -s http://localhost:3000/api/health >> $obsFile || true
-          echo "" >> $obsFile
-
-          # ---- REAL NODE METRICS WITH BARS ----
-          echo "# ============================================================" >> $obsFile
-          echo "# REAL NODE METRICS WITH VISUAL BARS                           " >> $obsFile
-          echo "# ============================================================" >> $obsFile
-
-          NODE_RAW=$(kubectl top nodes 2>&1 || true)
-          echo "$NODE_RAW" >> $obsFile
-          echo "" >> $obsFile
-
-          echo "$NODE_RAW" | tail -n +2 | while read -r line; do
-            NODE_NAME=$(echo "$line" | awk '{print $1}')
-            CPU_RAW=$(echo "$line"  | awk '{print $2}')
-            MEM_RAW=$(echo "$line"  | awk '{print $4}')
-            if [ -z "$NODE_NAME" ] || [ "$NODE_NAME" = "NAME" ]; then continue; fi
-            CPU_M=$(parse_cpu_m "$CPU_RAW")
-            MEM_MI=$(parse_mem_mi "$MEM_RAW")
-            CPU_BAR=$(ascii_bar ${CPU_M:-0} 2000 40)
-            MEM_BAR=$(ascii_bar ${MEM_MI:-0} 3800 40)
-            echo "  Node     : $NODE_NAME" >> $obsFile
-            echo "  CPU      : $CPU_RAW  $CPU_BAR" >> $obsFile
-            echo "  Memory   : $MEM_RAW  $MEM_BAR" >> $obsFile
-            echo "" >> $obsFile
-          done
-
-          # ---- POD METRICS ALL NAMESPACES ----
-          echo "# ============================================================" >> $obsFile
-          echo "# REAL POD METRICS - ALL NAMESPACES WITH VISUAL BARS           " >> $obsFile
-          echo "# ============================================================" >> $obsFile
-
-          POD_ALL_RAW=$(kubectl top pods --all-namespaces 2>&1 || true)
-          echo "$POD_ALL_RAW" >> $obsFile
-          echo "" >> $obsFile
-
-          echo "$POD_ALL_RAW" | tail -n +2 | while read -r line; do
-            NS=$(echo "$line"       | awk '{print $1}')
-            POD_NAME=$(echo "$line" | awk '{print $2}')
-            CPU_RAW=$(echo "$line"  | awk '{print $3}')
-            MEM_RAW=$(echo "$line"  | awk '{print $4}')
-            if [ -z "$POD_NAME" ] || [ "$POD_NAME" = "NAME" ]; then continue; fi
-            CPU_M=$(parse_cpu_m "$CPU_RAW")
-            MEM_MI=$(parse_mem_mi "$MEM_RAW")
-            CPU_BAR=$(ascii_bar ${CPU_M:-0} 1000 40)
-            MEM_BAR=$(ascii_bar ${MEM_MI:-0} 512 40)
-            echo "  Namespace: $NS" >> $obsFile
-            echo "  Pod      : $POD_NAME" >> $obsFile
-            echo "  CPU      : $CPU_RAW  $CPU_BAR" >> $obsFile
-            echo "  Memory   : $MEM_RAW  $MEM_BAR" >> $obsFile
-            echo "" >> $obsFile
-          done
-
-          # ---- HELM RELEASES ----
-          echo "# ============================================================" >> $obsFile
-          echo "# HELM RELEASES (ALL NAMESPACES)                               " >> $obsFile
-          echo "# ============================================================" >> $obsFile
-          helm list --all-namespaces >> $obsFile 2>&1 || true
-          echo "" >> $obsFile
-
-          # ---- SUMMARY ----
-          echo "# ============================================================" >> $obsFile
-          echo "# OBSERVABILITY AUDIT SUMMARY                                  " >> $obsFile
-          echo "# ============================================================" >> $obsFile
-          echo "# Grafana Dashboard UID : cluster-status" >> $obsFile
-          echo "# Grafana Admin URL     : http://localhost:3000" >> $obsFile
-          echo "# Grafana Import URL    : http://localhost:3000/dashboard/import" >> $obsFile
-          echo "#   -> Use 'Import via dashboard JSON model' box, paste the" >> $obsFile
-          echo "#      JSON from grafana-kubernetes-dashboard.json (or the" >> $obsFile
-          echo "#      block below) and click Load." >> $obsFile
-          echo "# Prometheus URL        : http://prometheus-server.monitoring.svc.cluster.local:80" >> $obsFile
-          echo "# Alerting              : ship.ps1 (Slack webhook + Outlook COM)" >> $obsFile
-          echo "# Helm Releases Active  : $(helm list --all-namespaces --short 2>/dev/null | wc -l)" >> $obsFile
-          echo "# Total Pods (all NS)   : $(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)" >> $obsFile
-          echo "# Total Running Pods    : $(kubectl get pods --all-namespaces --no-headers 2>/dev/null | grep -c Running || echo 0)" >> $obsFile
-          echo "# Total Nodes           : $(kubectl get nodes --no-headers 2>/dev/null | wc -l)" >> $obsFile
-          echo "# Audit Completed At    : $(date -u) UTC" >> $obsFile
-          echo "# ============================================================" >> $obsFile
-          echo "" >> $obsFile
-
-          echo "# ============================================================" >> $obsFile
-          echo "# DASHBOARD JSON (paste into Grafana Import URL above)        " >> $obsFile
-          echo "# ============================================================" >> $obsFile
-          cat grafana-kubernetes-dashboard.json >> $obsFile 2>/dev/null || true
-          echo "" >> $obsFile
-          echo "# ============================================================" >> $obsFile
-
-      - name: 16.5 Write deploy-state.json for ship.ps1
-        run: |
-          # Collect runtime values that ship.ps1 needs to build its notifications.
-          # This file is included in the artifact ZIP. After downloading the ZIP,
-          # place deploy-state.json next to ship.ps1 and run it locally.
-
-          POD_COUNT=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | grep -c Running || echo 0)
-          PIPELINE_START="${{ github.run_started_at }}"
-          NOW_EPOCH=$(date +%s)
-          # GitHub does not expose run_started_at as epoch directly, so we use
-          # a best-effort delta from the job start captured via env.
-          EXECUTION_DURATION=$(( $(date +%s) - $(date -d "${PIPELINE_START}" +%s 2>/dev/null || echo $NOW_EPOCH) ))
-
-          cat > deploy-state.json <<EOF
-          {
-            "dockerImage":          "${{ secrets.REGISTRY_USERNAME }}/expo-web-app",
-            "buildTag":             "${{ github.sha }}",
-            "helmRelease":          "expo-web-release",
-            "namespace":            "default",
-            "helmChartPath":        "./charts/my-web-app",
-            "podCount":             "$POD_COUNT",
-            "expoPort":             "80",
-            "executionDuration":    "$EXECUTION_DURATION",
-            "helmChartOutputFile":  "helm-chart-output.yaml"
-          }
-          EOF
-
-          echo "deploy-state.json written:"
-          cat deploy-state.json
-
-      - name: 17. Upload Real Deployment Artifacts (4 Files)
-        uses: actions/upload-artifact@v4
-        with:
-          name: real-grafana-deployment-artifacts
-          path: |
-            ./helm-chart-output.yaml
-            ./observability-audit-report.yaml
-            ./actual-grafana-dashboard.png
-            ./deploy-state.json
-          retention-days: 7
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: 3. Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          no-cache: true
+          tags: ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}
+
+      - name: 4. Start Minikube Cluster
+        uses: medyagh/setup-minikube@master
+        with:
+          cache: true
+
+      - name: 5. Enable Metrics Server
+        run: |
+          minikube addons enable metrics-server
+
+          kubectl patch deployment metrics-server -n kube-system --type='json' \
+            -p='[
+              {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"},
+              {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname"}
+            ]' || true
+
+          kubectl rollout status deployment/metrics-server -n kube-system --timeout=180s || true
+
+          echo "Waiting for Metrics API to become ready..."
+          for i in {1..30}; do
+            if kubectl top nodes >/dev/null 2>&1; then
+              echo "Metrics API is ready."
+              break
+            fi
+            echo "Metrics API not ready yet. Attempt $i/30"
+            sleep 10
+          done
+
+      - name: 5.5 Snapshot - Pods BEFORE Application Deploy
+        run: |
+          logFile="./helm-chart-output.yaml"
+          echo "# ============================================================" > $logFile
+          echo "#           AUTOMATED DEVOPS HELM DEPLOYMENT REPORT           " >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "# Generated At : $(date -u) UTC" >> $logFile
+          echo "# Commit SHA   : ${{ github.sha }}" >> $logFile
+          echo "# Docker Image : ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}" >> $logFile
+          echo "# Namespace    : default" >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "" >> $logFile
+
+          echo "# ============================================================" >> $logFile
+          echo "# PODS BEFORE APP DEPLOY (cluster baseline - kube-system etc) " >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "# These pods exist purely because Kubernetes itself needs them" >> $logFile
+          echo "# to run (control plane: etcd, apiserver, scheduler, controller-" >> $logFile
+          echo "# manager, coredns, kube-proxy, storage-provisioner, metrics-" >> $logFile
+          echo "# server). This is the minimum baseline on ANY cluster, before" >> $logFile
+          echo "# your application or any monitoring tools are deployed." >> $logFile
+          echo "" >> $logFile
+          kubectl get pods --all-namespaces -o wide >> $logFile 2>&1 || true
+          BEFORE_COUNT=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
+          echo "BEFORE_COUNT=$BEFORE_COUNT" > /tmp/podcounts.env
+          echo "" >> $logFile
+          echo "# Total pods BEFORE app deploy (baseline) : $BEFORE_COUNT" >> $logFile
+          echo "" >> $logFile
+
+      - name: 6. Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.12.0
+
+      - name: 8. Render Helm Manifest (Summary Only)
+        run: |
+          logFile="./helm-chart-output.yaml"
+          helm template expo-web-release ./charts/my-web-app \
+            --set image.repository="${{ secrets.REGISTRY_USERNAME }}/expo-web-app" \
+            --set image.tag="${{ github.sha }}" \
+            --set image.imagePullPolicy="IfNotPresent" \
+            --set service.type="LoadBalancer" \
+            --set service.port=80 \
+            --namespace default > /tmp/rendered-manifest.yaml 2>&1
+
+          echo "# ============================================================" >> $logFile
+          echo "# HELM RENDERED MANIFEST - RESOURCE SUMMARY                   " >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "# Total resources rendered: $(grep -c '^kind:' /tmp/rendered-manifest.yaml || echo 0)" >> $logFile
+          echo "" >> $logFile
+          echo "# Resource Kind | Name" >> $logFile
+          paste <(grep '^kind:' /tmp/rendered-manifest.yaml) <(grep '^  name:' /tmp/rendered-manifest.yaml) | sed 's/kind:/  -/' >> $logFile 2>&1 || true
+          echo "" >> $logFile
+
+      - name: 9. Deploy Application with Helm
+        run: |
+          helm upgrade --install expo-web-release ./charts/my-web-app \
+            --set image.repository="${{ secrets.REGISTRY_USERNAME }}/expo-web-app" \
+            --set image.tag="${{ github.sha }}" \
+            --set image.imagePullPolicy="IfNotPresent" \
+            --set service.type="LoadBalancer" \
+            --set service.port=80 \
+            --namespace default
+
+      - name: 9.5 Snapshot - Pods DURING/AFTER Rollout
+        run: |
+          logFile="./helm-chart-output.yaml"
+
+          echo "Waiting for app pod to become Ready before snapshotting..."
+          kubectl rollout status deployment/expo-web-deployment -n default --timeout=120s || true
+
+          echo "# ============================================================" >> $logFile
+          echo "# PODS AFTER APP DEPLOY (default namespace)                   " >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "# This is the application pod created by the Helm chart" >> $logFile
+          echo "# 'my-web-app'. Compare to the baseline above - this is the" >> $logFile
+          echo "# ONLY pod added by your actual application." >> $logFile
+          echo "" >> $logFile
+          kubectl get pods -n default -o wide >> $logFile 2>&1 || true
+          ROLLOUT_COUNT=$(kubectl get pods -n default --no-headers 2>/dev/null | wc -l)
+          AFTER_TOTAL=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
+          echo "AFTER_TOTAL=$AFTER_TOTAL" >> /tmp/podcounts.env
+          echo "" >> $logFile
+          echo "# Pods created by this Helm release (default ns) : $ROLLOUT_COUNT" >> $logFile
+          echo "# Total pods across cluster after app deploy     : $AFTER_TOTAL" >> $logFile
+          echo "# Net new pods added by app deploy (after - before baseline) : $ROLLOUT_COUNT" >> $logFile
+          echo "" >> $logFile
+
+      - name: 10. Verify Application Rollout (Minimised)
+        run: |
+          logFile="./helm-chart-output.yaml"
+
+          echo "# ============================================================" >> $logFile
+          echo "# KUBERNETES DEPLOYMENT STATUS                                " >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "" >> $logFile
+
+          echo "# --- DEPLOYMENTS (default namespace) ---" >> $logFile
+          kubectl get deployments -n default -o wide >> $logFile 2>&1 || true
+          echo "" >> $logFile
+
+          echo "# --- PODS (default namespace) ---" >> $logFile
+          kubectl get pods -n default -o wide >> $logFile 2>&1 || true
+          echo "" >> $logFile
+
+          echo "# --- SERVICES (default namespace) ---" >> $logFile
+          kubectl get svc -n default -o wide >> $logFile 2>&1 || true
+          echo "" >> $logFile
+
+          echo "# --- NODES (cluster-wide) ---" >> $logFile
+          kubectl get nodes -o wide >> $logFile 2>&1 || true
+          echo "" >> $logFile
+
+      - name: 10.5 Capture Real Pod and Node Metrics with Visual Bars
+        run: |
+          logFile="./helm-chart-output.yaml"
+
+          # ---- Helper: ASCII bar generator ----
+          ascii_bar() {
+            local val=$1
+            local max=$2
+            local width=${3:-40}
+            if [ "$max" -eq 0 ]; then max=1; fi
+            local filled=$(( val * width / max ))
+            local empty=$(( width - filled ))
+            local bar=""
+            for i in $(seq 1 $filled); do bar="${bar}#"; done
+            for i in $(seq 1 $empty); do bar="${bar}-"; done
+            echo "[${bar}] ${val}/${max}"
+          }
+
+          parse_cpu_m() {
+            local raw=$1
+            if echo "$raw" | grep -q 'm'; then
+              echo "$raw" | tr -d 'm'
+            else
+              echo $(( ${raw} * 1000 ))
+            fi
+          }
+
+          parse_mem_mi() {
+            local raw=$1
+            if echo "$raw" | grep -q 'Gi'; then
+              echo $(( $(echo "$raw" | tr -d 'Gi') * 1024 ))
+            elif echo "$raw" | grep -q 'Mi'; then
+              echo "$raw" | tr -d 'Mi'
+            elif echo "$raw" | grep -q 'Ki'; then
+              echo $(( $(echo "$raw" | tr -d 'Ki') / 1024 ))
+            else
+              echo "$raw"
+            fi
+          }
+
+          echo "# ============================================================" >> $logFile
+          echo "# NODE METRICS (CPU=millicores/2000m max  MEM=MiB/3800MiB max)" >> $logFile
+          echo "# ============================================================" >> $logFile
+
+          NODE_RAW=$(kubectl top nodes 2>&1 || true)
+          echo "$NODE_RAW" >> $logFile
+          echo "" >> $logFile
+
+          echo "$NODE_RAW" | tail -n +2 | while read -r line; do
+            NODE_NAME=$(echo "$line" | awk '{print $1}')
+            CPU_RAW=$(echo "$line"  | awk '{print $2}')
+            MEM_RAW=$(echo "$line"  | awk '{print $4}')
+            if [ -z "$NODE_NAME" ] || [ "$NODE_NAME" = "NAME" ]; then continue; fi
+            CPU_M=$(parse_cpu_m "$CPU_RAW")
+            MEM_MI=$(parse_mem_mi "$MEM_RAW")
+            CPU_BAR=$(ascii_bar ${CPU_M:-0} 2000 40)
+            MEM_BAR=$(ascii_bar ${MEM_MI:-0} 3800 40)
+            echo "  Node     : $NODE_NAME" >> $logFile
+            echo "  CPU      : $CPU_RAW  $CPU_BAR" >> $logFile
+            echo "  Memory   : $MEM_RAW  $MEM_BAR" >> $logFile
+            echo "" >> $logFile
+          done
+
+          echo "# ============================================================" >> $logFile
+          echo "# POD METRICS - DEFAULT NAMESPACE (CPU=millicores/1000m  MEM=MiB/512MiB)" >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "# NOTE: metrics-server needs ~15-30s of pod runtime before it" >> $logFile
+          echo "# has scrape data. We retry below to avoid 'metrics not" >> $logFile
+          echo "# available yet' errors on freshly-created pods." >> $logFile
+          echo "" >> $logFile
+
+          echo "Waiting for pod metrics to become available..."
+          for i in {1..12}; do
+            if kubectl top pods -n default >/dev/null 2>&1; then
+              echo "Pod metrics ready."
+              break
+            fi
+            echo "Pod metrics not ready yet. Attempt $i/12"
+            sleep 10
+          done
+
+          POD_DEFAULT_RAW=$(kubectl top pods -n default 2>&1 || true)
+          echo "$POD_DEFAULT_RAW" >> $logFile
+          echo "" >> $logFile
+
+          echo "$POD_DEFAULT_RAW" | tail -n +2 | while read -r line; do
+            POD_NAME=$(echo "$line" | awk '{print $1}')
+            CPU_RAW=$(echo "$line"  | awk '{print $2}')
+            MEM_RAW=$(echo "$line"  | awk '{print $3}')
+            if [ -z "$POD_NAME" ] || [ "$POD_NAME" = "NAME" ]; then continue; fi
+            CPU_M=$(parse_cpu_m "$CPU_RAW")
+            MEM_MI=$(parse_mem_mi "$MEM_RAW")
+            CPU_BAR=$(ascii_bar ${CPU_M:-0} 1000 40)
+            MEM_BAR=$(ascii_bar ${MEM_MI:-0} 512 40)
+            echo "  Pod      : $POD_NAME" >> $logFile
+            echo "  CPU      : $CPU_RAW  $CPU_BAR" >> $logFile
+            echo "  Memory   : $MEM_RAW  $MEM_BAR" >> $logFile
+            echo "" >> $logFile
+          done
+
+          echo "# ============================================================" >> $logFile
+          echo "# POD METRICS - ALL NAMESPACES (CPU=millicores/1000m  MEM=MiB/512MiB)" >> $logFile
+          echo "# ============================================================" >> $logFile
+
+          POD_ALL_RAW=$(kubectl top pods --all-namespaces 2>&1 || true)
+          echo "$POD_ALL_RAW" >> $logFile
+          echo "" >> $logFile
+
+          echo "$POD_ALL_RAW" | tail -n +2 | while read -r line; do
+            NS=$(echo "$line"       | awk '{print $1}')
+            POD_NAME=$(echo "$line" | awk '{print $2}')
+            CPU_RAW=$(echo "$line"  | awk '{print $3}')
+            MEM_RAW=$(echo "$line"  | awk '{print $4}')
+            if [ -z "$POD_NAME" ] || [ "$POD_NAME" = "NAME" ]; then continue; fi
+            CPU_M=$(parse_cpu_m "$CPU_RAW")
+            MEM_MI=$(parse_mem_mi "$MEM_RAW")
+            CPU_BAR=$(ascii_bar ${CPU_M:-0} 1000 40)
+            MEM_BAR=$(ascii_bar ${MEM_MI:-0} 512 40)
+            echo "  Namespace: $NS" >> $logFile
+            echo "  Pod      : $POD_NAME" >> $logFile
+            echo "  CPU      : $CPU_RAW  $CPU_BAR" >> $logFile
+            echo "  Memory   : $MEM_RAW  $MEM_BAR" >> $logFile
+            echo "" >> $logFile
+          done
+
+      - name: 11. Install Prometheus
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
+
+          helm upgrade --install prometheus prometheus-community/prometheus \
+            --namespace monitoring \
+            --create-namespace \
+            --set alertmanager.enabled=false \
+            --set server.persistentVolume.enabled=false \
+            --set pushgateway.enabled=false \
+            --set kube-state-metrics.enabled=true \
+            --set prometheus-node-exporter.enabled=true
+
+          kubectl rollout status deployment/prometheus-server -n monitoring --timeout=180s
+
+      - name: 11.5 Snapshot - Pods AFTER Prometheus Install
+        run: |
+          logFile="./helm-chart-output.yaml"
+          echo "# ============================================================" >> $logFile
+          echo "# PODS AFTER PROMETHEUS INSTALL (monitoring namespace)        " >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "# Prometheus stack adds: prometheus-server, kube-state-metrics," >> $logFile
+          echo "# and a prometheus-node-exporter pod on EVERY node (DaemonSet)." >> $logFile
+          echo "" >> $logFile
+          kubectl get pods -n monitoring -o wide >> $logFile 2>&1 || true
+          PROM_STEP_COUNT=$(kubectl get pods -n monitoring --no-headers 2>/dev/null | wc -l)
+          TOTAL_AFTER_PROM=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
+          echo "TOTAL_AFTER_PROM=$TOTAL_AFTER_PROM" >> /tmp/podcounts.env
+          echo "" >> $logFile
+          echo "# Pods in monitoring ns after Prometheus install : $PROM_STEP_COUNT" >> $logFile
+          echo "# Total pods across cluster after Prometheus     : $TOTAL_AFTER_PROM" >> $logFile
+          echo "" >> $logFile
+
+      - name: 12. Create Real Grafana Dashboard ConfigMap
+        run: |
+          cat > grafana-kubernetes-dashboard.json <<'EOF'
+          {
+            "uid": "cluster-status",
+            "title": "Kubernetes Cluster Live Dashboard",
+            "tags": ["kubernetes", "prometheus", "devops"],
+            "timezone": "browser",
+            "schemaVersion": 39,
+            "version": 1,
+            "refresh": "10s",
+            "panels": [
+              {
+                "id": 1,
+                "type": "stat",
+                "title": "Running Pods",
+                "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+                "targets": [
+                  {
+                    "expr": "count(kube_pod_status_phase{phase=\"Running\"})",
+                    "legendFormat": "Running Pods",
+                    "refId": "A"
+                  }
+                ],
+                "datasource": { "type": "prometheus", "uid": "Prometheus" }
+              },
+              {
+                "id": 2,
+                "type": "stat",
+                "title": "Cluster Nodes",
+                "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+                "targets": [
+                  {
+                    "expr": "count(up{job=~\".*node.*|.*kubernetes.*\"})",
+                    "legendFormat": "Nodes",
+                    "refId": "A"
+                  }
+                ],
+                "datasource": { "type": "prometheus", "uid": "Prometheus" }
+              },
+              {
+                "id": 3,
+                "type": "timeseries",
+                "title": "Node CPU Usage %",
+                "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+                "targets": [
+                  {
+                    "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+                    "legendFormat": "{{instance}} CPU %",
+                    "refId": "A"
+                  }
+                ],
+                "datasource": { "type": "prometheus", "uid": "Prometheus" }
+              },
+              {
+                "id": 4,
+                "type": "timeseries",
+                "title": "Node Memory Usage %",
+                "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+                "targets": [
+                  {
+                    "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+                    "legendFormat": "{{instance}} Memory %",
+                    "refId": "A"
+                  }
+                ],
+                "datasource": { "type": "prometheus", "uid": "Prometheus" }
+              },
+              {
+                "id": 5,
+                "type": "timeseries",
+                "title": "Pod CPU Usage",
+                "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+                "targets": [
+                  {
+                    "expr": "sum by(namespace, pod) (rate(container_cpu_usage_seconds_total{container!=\"\", pod!=\"\"}[5m]))",
+                    "legendFormat": "{{namespace}}/{{pod}}",
+                    "refId": "A"
+                  }
+                ],
+                "datasource": { "type": "prometheus", "uid": "Prometheus" }
+              },
+              {
+                "id": 6,
+                "type": "timeseries",
+                "title": "Pod Memory Usage",
+                "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+                "targets": [
+                  {
+                    "expr": "sum by(namespace, pod) (container_memory_working_set_bytes{container!=\"\", pod!=\"\"})",
+                    "legendFormat": "{{namespace}}/{{pod}}",
+                    "refId": "A"
+                  }
+                ],
+                "datasource": { "type": "prometheus", "uid": "Prometheus" }
+              }
+            ]
+          }
+          EOF
+
+          kubectl create configmap grafana-kubernetes-dashboard \
+            -n monitoring \
+            --from-file=grafana-kubernetes-dashboard.json \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl label configmap grafana-kubernetes-dashboard \
+            -n monitoring grafana_dashboard=1 --overwrite
+
+      - name: 13. Install Grafana with Real Dashboard Provisioning
+        run: |
+          helm upgrade --install grafana grafana/grafana \
+            --namespace monitoring \
+            --set persistence.enabled=false \
+            --set adminUser=admin \
+            --set adminPassword=admin \
+            --set sidecar.dashboards.enabled=true \
+            --set sidecar.dashboards.label=grafana_dashboard \
+            --set sidecar.dashboards.folder=/tmp/dashboards \
+            --set datasources."datasources\.yaml".apiVersion=1 \
+            --set datasources."datasources\.yaml".datasources[0].name=Prometheus \
+            --set datasources."datasources\.yaml".datasources[0].uid=Prometheus \
+            --set datasources."datasources\.yaml".datasources[0].type=prometheus \
+            --set datasources."datasources\.yaml".datasources[0].url=http://prometheus-server.monitoring.svc.cluster.local:80 \
+            --set datasources."datasources\.yaml".datasources[0].access=proxy \
+            --set datasources."datasources\.yaml".datasources[0].isDefault=true
+
+          kubectl rollout status deployment/grafana -n monitoring --timeout=180s
+
+      - name: 13.5 Snapshot - Pods AFTER Grafana Install (Final Summary)
+        run: |
+          logFile="./helm-chart-output.yaml"
+          source /tmp/podcounts.env || true
+          echo "# ============================================================" >> $logFile
+          echo "# PODS AFTER GRAFANA INSTALL (monitoring namespace)           " >> $logFile
+          echo "# ============================================================" >> $logFile
+          kubectl get pods -n monitoring -o wide >> $logFile 2>&1 || true
+          MONITORING_FINAL=$(kubectl get pods -n monitoring --no-headers 2>/dev/null | wc -l)
+          TOTAL_FINAL=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
+          NODE_FINAL=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
+          echo "" >> $logFile
+          echo "# Pods in monitoring ns after Grafana install : $MONITORING_FINAL" >> $logFile
+          echo "# Total pods across cluster (final)           : $TOTAL_FINAL" >> $logFile
+          echo "" >> $logFile
+
+          echo "# ============================================================" >> $logFile
+          echo "# POD COUNT PROGRESSION SUMMARY (per pipeline step)           " >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "# Stage                                  | Pods (cumulative)" >> $logFile
+          echo "# ---------------------------------------|------------------" >> $logFile
+          echo "# 1. Before app deploy (K8s baseline)    | $BEFORE_COUNT" >> $logFile
+          echo "# 2. After app deploy (+your app pod)    | $AFTER_TOTAL" >> $logFile
+          echo "# 3. After Prometheus install            | $TOTAL_AFTER_PROM" >> $logFile
+          echo "# 4. After Grafana install (final)       | $TOTAL_FINAL" >> $logFile
+          echo "#" >> $logFile
+          echo "# Cluster nodes: $NODE_FINAL" >> $logFile
+          echo "# Each DaemonSet (kube-proxy, node-exporter) adds 1 pod PER" >> $logFile
+          echo "# NODE. On a multi-node cluster this multiplies quickly even" >> $logFile
+          echo "# though only ~4 unique workloads were actually installed" >> $logFile
+          echo "# (app, prometheus-server, kube-state-metrics, grafana)." >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "" >> $logFile
+
+      - name: 14. Export Real Grafana Dashboard JSON
+        run: |
+          sleep 45
+
+          kubectl port-forward -n monitoring svc/grafana 3000:80 > /tmp/grafana-port-forward.log 2>&1 &
+          echo $! > /tmp/grafana-port-forward.pid
+          sleep 10
+
+          curl -s -u admin:admin \
+            http://localhost:3000/api/dashboards/uid/cluster-status \
+            -o grafana-native-dashboard.json
+
+          test -s grafana-native-dashboard.json
+
+      - name: 15. Capture Actual Grafana Dashboard Screenshot
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install --with-deps chromium
+
+          cat > capture-grafana.js <<'EOF'
+          const { chromium } = require('playwright');
+
+          (async () => {
+            const browser = await chromium.launch();
+            const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+
+            await page.goto('http://localhost:3000/login', { waitUntil: 'networkidle' });
+            await page.fill('input[name="user"]', 'admin');
+            await page.fill('input[name="password"]', 'admin');
+            await page.click('button[type="submit"]');
+            await page.waitForTimeout(5000);
+
+            await page.goto('http://localhost:3000/d/cluster-status/kubernetes-cluster-live-dashboard?orgId=1&refresh=10s', {
+              waitUntil: 'networkidle'
+            });
+
+            await page.waitForTimeout(15000);
+            await page.screenshot({
+              path: 'actual-grafana-dashboard.png',
+              fullPage: true
+            });
+
+            await browser.close();
+          })();
+          EOF
+
+          node capture-grafana.js
+
+      - name: 16. Create Observability Audit Report (with Pod Classification)
+        run: |
+          obsFile="./observability-audit-report.yaml"
+
+          ascii_bar() {
+            local val=$1
+            local max=$2
+            local width=${3:-40}
+            if [ "$max" -eq 0 ]; then max=1; fi
+            local filled=$(( val * width / max ))
+            local empty=$(( width - filled ))
+            local bar=""
+            for i in $(seq 1 $filled); do bar="${bar}#"; done
+            for i in $(seq 1 $empty); do bar="${bar}-"; done
+            echo "[${bar}] ${val}/${max}"
+          }
+
+          parse_cpu_m() {
+            local raw=$1
+            if echo "$raw" | grep -q 'm'; then
+              echo "$raw" | tr -d 'm'
+            else
+              echo $(( ${raw} * 1000 ))
+            fi
+          }
+
+          parse_mem_mi() {
+            local raw=$1
+            if echo "$raw" | grep -q 'Gi'; then
+              echo $(( $(echo "$raw" | tr -d 'Gi') * 1024 ))
+            elif echo "$raw" | grep -q 'Mi'; then
+              echo "$raw" | tr -d 'Mi'
+            elif echo "$raw" | grep -q 'Ki'; then
+              echo $(( $(echo "$raw" | tr -d 'Ki') / 1024 ))
+            else
+              echo "$raw"
+            fi
+          }
+
+          echo "# ============================================================" > $obsFile
+          echo "#       KUBERNETES OBSERVABILITY STACK AUDIT REPORT           " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          echo "# Status       : ACTIVE" >> $obsFile
+          echo "# Namespace    : monitoring" >> $obsFile
+          echo "# Prometheus   : Installed" >> $obsFile
+          echo "# Grafana      : Installed" >> $obsFile
+          echo "# Dashboard    : Real Grafana Dashboard UID cluster-status" >> $obsFile
+          echo "# Generated At : $(date -u) UTC" >> $obsFile
+          echo "# Commit SHA   : ${{ github.sha }}" >> $obsFile
+          echo "# Docker Image : ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}" >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          echo "" >> $obsFile
+
+          # ---- POD CLASSIFICATION SUMMARY ----
+          echo "# ============================================================" >> $obsFile
+          echo "# POD CLASSIFICATION SUMMARY                                   " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+
+          KUBE_SYSTEM_COUNT=$(kubectl get pods -n kube-system --no-headers 2>/dev/null | wc -l)
+          DEFAULT_COUNT=$(kubectl get pods -n default --no-headers 2>/dev/null | wc -l)
+          MONITORING_COUNT=$(kubectl get pods -n monitoring --no-headers 2>/dev/null | wc -l)
+          PROM_COUNT=$(kubectl get pods -n monitoring -l app.kubernetes.io/instance=prometheus --no-headers 2>/dev/null | wc -l)
+          GRAFANA_COUNT=$(kubectl get pods -n monitoring -l app.kubernetes.io/instance=grafana --no-headers 2>/dev/null | wc -l)
+          TOTAL_COUNT=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
+          NODE_COUNT=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
+
+          echo "# Cluster Nodes                         : $NODE_COUNT" >> $obsFile
+          echo "#" >> $obsFile
+          echo "# 1. kube-system pods (K8s control plane" >> $obsFile
+          echo "#    + kube-proxy/node-exporter DaemonSets," >> $obsFile
+          echo "#    multiplied by node count)            : $KUBE_SYSTEM_COUNT" >> $obsFile
+          echo "#" >> $obsFile
+          echo "# 2. App pods (default ns - Helm chart" >> $obsFile
+          echo "#    'my-web-app' / expo-web-release)     : $DEFAULT_COUNT" >> $obsFile
+          echo "#" >> $obsFile
+          echo "# 3. Monitoring namespace total           : $MONITORING_COUNT" >> $obsFile
+          echo "#      - Prometheus stack (server,        " >> $obsFile
+          echo "#        kube-state-metrics, node-exporter" >> $obsFile
+          echo "#        DaemonSet x nodes)                : $PROM_COUNT" >> $obsFile
+          echo "#      - Grafana                          : $GRAFANA_COUNT" >> $obsFile
+          echo "#" >> $obsFile
+          echo "# TOTAL PODS RUNNING (all namespaces)     : $TOTAL_COUNT" >> $obsFile
+          echo "" >> $obsFile
+          echo "# NOTE: Most of the count comes from K8s control-plane pods" >> $obsFile
+          echo "#       and DaemonSets (kube-proxy, node-exporter) which run" >> $obsFile
+          echo "#       ONCE PER NODE. With $NODE_COUNT nodes, each DaemonSet" >> $obsFile
+          echo "#       alone contributes $NODE_COUNT pods. Your actual app" >> $obsFile
+          echo "#       is only $DEFAULT_COUNT pod(s)." >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          echo "" >> $obsFile
+
+          # ---- MONITORING STACK ----
+          echo "# ============================================================" >> $obsFile
+          echo "# MONITORING NAMESPACE - PODS                                  " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          kubectl get pods -n monitoring -o wide >> $obsFile 2>&1 || true
+          echo "" >> $obsFile
+
+          echo "# ============================================================" >> $obsFile
+          echo "# MONITORING NAMESPACE - SERVICES                              " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          kubectl get svc -n monitoring -o wide >> $obsFile 2>&1 || true
+          echo "" >> $obsFile
+
+          echo "# ============================================================" >> $obsFile
+          echo "# GRAFANA HEALTH CHECK                                         " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          curl -s http://localhost:3000/api/health >> $obsFile || true
+          echo "" >> $obsFile
+
+          # ---- REAL NODE METRICS WITH BARS ----
+          echo "# ============================================================" >> $obsFile
+          echo "# REAL NODE METRICS WITH VISUAL BARS                           " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+
+          NODE_RAW=$(kubectl top nodes 2>&1 || true)
+          echo "$NODE_RAW" >> $obsFile
+          echo "" >> $obsFile
+
+          echo "$NODE_RAW" | tail -n +2 | while read -r line; do
+            NODE_NAME=$(echo "$line" | awk '{print $1}')
+            CPU_RAW=$(echo "$line"  | awk '{print $2}')
+            MEM_RAW=$(echo "$line"  | awk '{print $4}')
+            if [ -z "$NODE_NAME" ] || [ "$NODE_NAME" = "NAME" ]; then continue; fi
+            CPU_M=$(parse_cpu_m "$CPU_RAW")
+            MEM_MI=$(parse_mem_mi "$MEM_RAW")
+            CPU_BAR=$(ascii_bar ${CPU_M:-0} 2000 40)
+            MEM_BAR=$(ascii_bar ${MEM_MI:-0} 3800 40)
+            echo "  Node     : $NODE_NAME" >> $obsFile
+            echo "  CPU      : $CPU_RAW  $CPU_BAR" >> $obsFile
+            echo "  Memory   : $MEM_RAW  $MEM_BAR" >> $obsFile
+            echo "" >> $obsFile
+          done
+
+          # ---- POD METRICS ALL NAMESPACES ----
+          echo "# ============================================================" >> $obsFile
+          echo "# REAL POD METRICS - ALL NAMESPACES WITH VISUAL BARS           " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+
+          POD_ALL_RAW=$(kubectl top pods --all-namespaces 2>&1 || true)
+          echo "$POD_ALL_RAW" >> $obsFile
+          echo "" >> $obsFile
+
+          echo "$POD_ALL_RAW" | tail -n +2 | while read -r line; do
+            NS=$(echo "$line"       | awk '{print $1}')
+            POD_NAME=$(echo "$line" | awk '{print $2}')
+            CPU_RAW=$(echo "$line"  | awk '{print $3}')
+            MEM_RAW=$(echo "$line"  | awk '{print $4}')
+            if [ -z "$POD_NAME" ] || [ "$POD_NAME" = "NAME" ]; then continue; fi
+            CPU_M=$(parse_cpu_m "$CPU_RAW")
+            MEM_MI=$(parse_mem_mi "$MEM_RAW")
+            CPU_BAR=$(ascii_bar ${CPU_M:-0} 1000 40)
+            MEM_BAR=$(ascii_bar ${MEM_MI:-0} 512 40)
+            echo "  Namespace: $NS" >> $obsFile
+            echo "  Pod      : $POD_NAME" >> $obsFile
+            echo "  CPU      : $CPU_RAW  $CPU_BAR" >> $obsFile
+            echo "  Memory   : $MEM_RAW  $MEM_BAR" >> $obsFile
+            echo "" >> $obsFile
+          done
+
+          # ---- HELM RELEASES ----
+          echo "# ============================================================" >> $obsFile
+          echo "# HELM RELEASES (ALL NAMESPACES)                               " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          helm list --all-namespaces >> $obsFile 2>&1 || true
+          echo "" >> $obsFile
+
+          # ---- SUMMARY ----
+          echo "# ============================================================" >> $obsFile
+          echo "# OBSERVABILITY AUDIT SUMMARY                                  " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          echo "# Grafana Dashboard UID : cluster-status" >> $obsFile
+          echo "# Grafana Admin URL     : http://localhost:3000" >> $obsFile
+          echo "# Grafana Import URL    : http://localhost:3000/dashboard/import" >> $obsFile
+          echo "#   -> Use 'Import via dashboard JSON model' box, paste the" >> $obsFile
+          echo "#      JSON from grafana-kubernetes-dashboard.json (or the" >> $obsFile
+          echo "#      block below) and click Load." >> $obsFile
+          echo "# Prometheus URL        : http://prometheus-server.monitoring.svc.cluster.local:80" >> $obsFile
+          echo "# Helm Releases Active  : $(helm list --all-namespaces --short 2>/dev/null | wc -l)" >> $obsFile
+          echo "# Total Pods (all NS)   : $(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)" >> $obsFile
+          echo "# Total Running Pods    : $(kubectl get pods --all-namespaces --no-headers 2>/dev/null | grep -c Running || echo 0)" >> $obsFile
+          echo "# Total Nodes           : $(kubectl get nodes --no-headers 2>/dev/null | wc -l)" >> $obsFile
+          echo "# Audit Completed At    : $(date -u) UTC" >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          echo "" >> $obsFile
+
+          echo "# ============================================================" >> $obsFile
+          echo "# DASHBOARD JSON (paste into Grafana Import URL above)        " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          cat grafana-kubernetes-dashboard.json >> $obsFile 2>/dev/null || true
+          echo "" >> $obsFile
+          echo "# ============================================================" >> $obsFile
+
+      - name: 17. Upload Real Deployment Artifacts (3 Files Only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-grafana-deployment-artifacts
+          path: |
+            ./helm-chart-output.yaml
+            ./observability-audit-report.yaml
+            ./actual-grafana-dashboard.png
+          retention-days: 7
+
