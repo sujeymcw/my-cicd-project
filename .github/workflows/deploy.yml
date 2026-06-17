@@ -447,6 +447,89 @@ jobs:
           echo "# (app, prometheus-server, kube-state-metrics, grafana)." >> $logFile
           echo "# ============================================================" >> $logFile
           echo "" >> $logFile
+      - name: 13.6 Add Pod Use Cases to Helm Output File
+        run: |
+          logFile="./helm-chart-output.yaml"
+          echo "# ============================================================" >> $logFile
+          echo "# POD USE CASES / PURPOSE DETAILS                             " >> $logFile
+          echo "# ============================================================" >> $logFile
+          echo "# This section explains WHY each pod exists in the cluster." >> $logFile
+          echo "# It helps identify whether a pod belongs to Kubernetes core," >> $logFile
+          echo "# the application deployment, metrics collection, Prometheus," >> $logFile
+          echo "# Grafana, or cluster networking/storage support." >> $logFile
+          echo "" >> $logFile
+          kubectl get pods --all-namespaces --no-headers 2>/dev/null | while read -r NS POD READY STATUS RESTARTS AGE REST; do
+            if [ -z "$POD" ]; then continue; fi
+            USE_CASE="General Kubernetes workload running in the cluster."
+            CATEGORY="Other Workload"
+            case "$POD" in
+              etcd-*)
+                CATEGORY="Kubernetes Control Plane"
+                USE_CASE="Stores complete Kubernetes cluster state, configuration, secrets metadata, service discovery data, and scheduling state."
+                ;;
+              kube-apiserver-*)
+                CATEGORY="Kubernetes Control Plane"
+                USE_CASE="Main Kubernetes API entry point. kubectl, Helm, controllers, and cluster components communicate through this pod."
+                ;;
+              kube-controller-manager-*)
+                CATEGORY="Kubernetes Control Plane"
+                USE_CASE="Runs Kubernetes controllers that maintain desired state for deployments, replicas, nodes, endpoints, and other resources."
+                ;;
+              kube-scheduler-*)
+                CATEGORY="Kubernetes Control Plane"
+                USE_CASE="Chooses the best node for newly-created pods based on resources, constraints, and scheduling rules."
+                ;;
+              kube-proxy-*)
+                CATEGORY="Cluster Networking"
+                USE_CASE="Maintains network rules so Services can route traffic to the correct backend pods across the cluster."
+                ;;
+              coredns-*|dns-*)
+                CATEGORY="Cluster DNS"
+                USE_CASE="Provides internal DNS resolution so pods can reach services using names like service.namespace.svc.cluster.local."
+                ;;
+              storage-provisioner*)
+                CATEGORY="Local Storage"
+                USE_CASE="Provides dynamic local storage provisioning for Minikube persistent volume claims."
+                ;;
+              metrics-server-*)
+                CATEGORY="Resource Metrics"
+                USE_CASE="Collects CPU and memory usage from kubelets and enables kubectl top nodes/pods plus HPA metrics."
+                ;;
+              expo-web-deployment-*|expo-web-release-*|*expo-web*)
+                CATEGORY="Application Pod"
+                USE_CASE="Runs the deployed Expo web application container created by the Helm chart release expo-web-release."
+                ;;
+              prometheus-server-*)
+                CATEGORY="Monitoring - Prometheus"
+                USE_CASE="Scrapes, stores, and queries time-series metrics from Kubernetes, nodes, services, and application targets."
+                ;;
+              prometheus-kube-state-metrics-*|kube-state-metrics-*)
+                CATEGORY="Monitoring - Kubernetes State"
+                USE_CASE="Exports Kubernetes object state metrics such as deployments, pods, replicas, namespaces, and resource status."
+                ;;
+              prometheus-prometheus-node-exporter-*|*node-exporter*)
+                CATEGORY="Monitoring - Node Exporter"
+                USE_CASE="Runs as a DaemonSet on each node and exposes node-level CPU, memory, disk, filesystem, and network metrics."
+                ;;
+              grafana-*)
+                CATEGORY="Visualization - Grafana"
+                USE_CASE="Provides the Grafana web UI and dashboards to visualize Prometheus metrics for pods, nodes, and cluster health."
+                ;;
+              *dashboard*)
+                CATEGORY="Dashboard / UI"
+                USE_CASE="Provides dashboard-related UI or supporting workload for visual monitoring and management."
+                ;;
+            esac
+            echo "Pod Name   : $POD" >> $logFile
+            echo "Namespace  : $NS" >> $logFile
+            echo "Category   : $CATEGORY" >> $logFile
+            echo "Status     : $STATUS" >> $logFile
+            echo "Use Case   : $USE_CASE" >> $logFile
+            echo "" >> $logFile
+          done
+          echo "# ============================================================" >> $logFile
+          echo "" >> $logFile
+
       - name: 14. Export Real Grafana Dashboard JSON
         run: |
           sleep 45
