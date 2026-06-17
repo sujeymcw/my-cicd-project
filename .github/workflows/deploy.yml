@@ -172,7 +172,6 @@ jobs:
         run: |
           logFile="./helm-chart-output.yaml"
 
-          # ---- Helper: ASCII bar generator ----
           ascii_bar() {
             local val=$1
             local max=$2
@@ -317,7 +316,7 @@ jobs:
           # metrics-server             kube-system   Powers `kubectl top` and HPA metrics
           # expo-web-deployment-*      default       Your application pod (frontend/web app)
           # prometheus-server          monitoring    Scrapes and stores metrics, feeds Grafana
-          # grafana                    monitoring    Dashboard UI + alerting/email notifications
+          # grafana                    monitoring    Dashboard UI
           # ------------------------------------------------------------
           # REMOVED (not required to run/view your app dashboard):
           #   kube-state-metrics        - exposed K8s object-state metrics, unused by your panels
@@ -333,10 +332,6 @@ jobs:
           helm repo add grafana https://grafana.github.io/helm-charts
           helm repo update
 
-          # kube-state-metrics and node-exporter removed: they feed metrics
-          # (kube_pod_status_phase per-object state, node-level OS stats) that
-          # your frontend dashboard panels (app pod CPU/memory) do not use.
-          # prometheus-server itself is kept since Grafana queries it directly.
           helm upgrade --install prometheus prometheus-community/prometheus \
             --namespace monitoring \
             --create-namespace \
@@ -447,71 +442,8 @@ jobs:
           kubectl label configmap grafana-kubernetes-dashboard \
             -n monitoring grafana_dashboard=1 --overwrite
 
-      - name: 12.5 Provision Grafana Alert Rule + Email Contact Point
+      - name: 13. Install Grafana with Dashboard Provisioning
         run: |
-          # Pod-count threshold alert. Adjust the value 15 below to your
-          # actual desired pod limit for this cluster.
-          cat > alerting.yaml <<'EOF'
-          apiVersion: 1
-          contactPoints:
-            - orgId: 1
-              name: pod-limit-email
-              receivers:
-                - uid: pod-limit-email-receiver
-                  type: email
-                  settings:
-                    addresses: sujey.hariprasad@multicorewareinc.com
-                    singleEmail: true
-          policies:
-            - orgId: 1
-              receiver: pod-limit-email
-          groups:
-            - orgId: 1
-              name: pod-count-group
-              folder: General
-              interval: 1m
-              rules:
-                - uid: pod-count-limit
-                  title: Pod Count Exceeds Limit
-                  condition: C
-                  data:
-                    - refId: A
-                      datasourceUid: Prometheus
-                      relativeTimeRange:
-                        from: 60
-                        to: 0
-                      model:
-                        expr: count(kube_pod_info)
-                        instant: true
-                        refId: A
-                    - refId: C
-                      datasourceUid: "__expr__"
-                      model:
-                        type: threshold
-                        expression: A
-                        conditions:
-                          - evaluator:
-                              type: gt
-                              params: [15]
-                        refId: C
-                  noDataState: NoData
-                  execErrState: Alerting
-                  for: 1m
-                  annotations:
-                    summary: "Cluster pod count {{ $values.A }} exceeded the configured limit of 15"
-                  labels:
-                    severity: warning
-          EOF
-
-          kubectl create configmap grafana-alerting-provisioning \
-            -n monitoring \
-            --from-file=alerting.yaml \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: 13. Install Grafana with Real Dashboard Provisioning + Email Alerts
-        run: |
-          # NOTE: SMTP password is pulled from a GitHub secret, never hardcoded.
-          # Required secret: GRAFANA_SMTP_USER, GRAFANA_SMTP_PASSWORD
           logFile="./helm-chart-output.yaml"
 
           echo "# ============================================================" >> $logFile
@@ -536,21 +468,10 @@ jobs:
             --set datasources."datasources\.yaml".datasources[0].type=prometheus \
             --set datasources."datasources\.yaml".datasources[0].url=http://prometheus-server.monitoring.svc.cluster.local:80 \
             --set datasources."datasources\.yaml".datasources[0].access=proxy \
-            --set datasources."datasources\.yaml".datasources[0].isDefault=true \
-            --set grafana\\.ini.smtp.enabled=true \
-            --set grafana\\.ini.smtp.host="smtp.gmail.com:587" \
-            --set grafana\\.ini.smtp.user="${{ secrets.GRAFANA_SMTP_USER }}" \
-            --set grafana\\.ini.smtp.password="${{ secrets.GRAFANA_SMTP_PASSWORD }}" \
-            --set grafana\\.ini.smtp.from_address="${{ secrets.GRAFANA_SMTP_USER }}" \
-            --set grafana\\.ini.smtp.from_name="Grafana Pod Alerts" \
-            --set "extraConfigmapMounts[0].name=alerting-provisioning" \
-            --set "extraConfigmapMounts[0].configMap=grafana-alerting-provisioning" \
-            --set "extraConfigmapMounts[0].mountPath=/etc/grafana/provisioning/alerting/alerting.yaml" \
-            --set "extraConfigmapMounts[0].subPath=alerting.yaml" \
-            --set "extraConfigmapMounts[0].readOnly=true" >> $logFile 2>&1 || true
+            --set datasources."datasources\.yaml".datasources[0].isDefault=true >> $logFile 2>&1 || true
 
           echo "" >> $logFile
-          echo "# Waiting for Grafana deployment. This is non-fatal so artifact files are still produced." >> $logFile
+          echo "# Waiting for Grafana deployment." >> $logFile
           kubectl rollout status deployment/grafana -n monitoring --timeout=300s >> $logFile 2>&1 || true
 
           echo "" >> $logFile
@@ -640,65 +561,118 @@ jobs:
           echo "# GRAFANA SCREENSHOT CAPTURE STATUS                           " >> $logFile
           echo "# ============================================================" >> $logFile
 
-          npm init -y
-          npm install playwright
-          npx playwright install --with-deps chromium
+          # ---- 1. Ensure port-forward is alive ----
+          pkill -f "port-forward.*grafana" || true
+          sleep 2
+          kubectl port-forward -n monitoring svc/grafana 3000:80 \
+            > /tmp/grafana-port-forward.log 2>&1 &
+          PF_PID=$!
+          echo "# Port-forward PID: $PF_PID" >> $logFile
 
-          cat > capture-grafana.js <<'EOF'
+          # ---- 2. Wait until Grafana HTTP is actually responding (up to 3 min) ----
+          echo "Waiting for Grafana HTTP on localhost:3000..."
+          GRAFANA_READY=false
+          for i in {1..36}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -u admin:admin http://localhost:3000/api/health 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "# Grafana is up (attempt $i). HTTP $HTTP_CODE" >> $logFile
+              GRAFANA_READY=true
+              break
+            fi
+            echo "# Grafana not ready yet (attempt $i/36, HTTP $HTTP_CODE)" >> $logFile
+            sleep 5
+          done
+
+          if [ "$GRAFANA_READY" = "false" ]; then
+            echo "# Grafana did not become ready in time." >> $logFile
+          fi
+
+          # ---- 3. Wait for dashboard to be provisioned ----
+          echo "Waiting for dashboard UID cluster-status to be provisioned..."
+          DASH_READY=false
+          for i in {1..24}; do
+            DASH_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -u admin:admin \
+              http://localhost:3000/api/dashboards/uid/cluster-status 2>/dev/null || echo "000")
+            if [ "$DASH_CODE" = "200" ]; then
+              echo "# Dashboard provisioned (attempt $i)." >> $logFile
+              DASH_READY=true
+              break
+            fi
+            echo "# Dashboard not provisioned yet (attempt $i/24, HTTP $DASH_CODE)" >> $logFile
+            sleep 5
+          done
+
+          # ---- 4. Install Playwright ----
+          npm init -y > /dev/null 2>&1
+          npm install playwright > /dev/null 2>&1
+          npx playwright install --with-deps chromium > /dev/null 2>&1
+
+          # ---- 5. Capture ----
+          cat > capture-grafana.js <<'JSEOF'
           const { chromium } = require('playwright');
-          const fs = require('fs');
 
           (async () => {
-            const browser = await chromium.launch();
-            const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+            const browser = await chromium.launch({ args: ['--no-sandbox'] });
+            const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+            const BASE = 'http://localhost:3000';
 
-            try {
-              await page.goto('http://localhost:3000/login', { waitUntil: 'networkidle', timeout: 60000 });
-              await page.fill('input[name="user"]', 'admin');
-              await page.fill('input[name="password"]', 'admin');
-              await page.click('button[type="submit"]');
-              await page.waitForTimeout(5000);
+            // --- Login ---
+            await page.goto(`${BASE}/login`, { waitUntil: 'networkidle', timeout: 60000 });
 
-              await page.goto('http://localhost:3000/d/cluster-status/kubernetes-cluster-live-dashboard?orgId=1&refresh=10s', {
-                waitUntil: 'networkidle',
-                timeout: 60000
-              });
+            // Dismiss any pre-login modal
+            const skipPre = page.locator('button:has-text("Skip")');
+            if (await skipPre.isVisible({ timeout: 3000 }).catch(() => false)) await skipPre.click();
 
-              await page.waitForTimeout(15000);
-              await page.screenshot({
-                path: 'actual-grafana-dashboard.png',
-                fullPage: true
-              });
-            } catch (error) {
-              const html = `
-                <html>
-                  <body style="font-family: Arial, sans-serif; padding: 60px;">
-                    <h1>Kubernetes Cluster Live Dashboard</h1>
-                    <h2>Grafana screenshot fallback</h2>
-                    <p>Grafana was installed/provisioned, but the web UI was not reachable before the CI timeout.</p>
-                    <p>The workflow still generated helm-chart-output.yaml, observability-audit-report.yaml, and dashboard JSON.</p>
-                    <pre>${String(error).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</pre>
-                  </body>
-                </html>`;
-              await page.setContent(html);
-              await page.screenshot({
-                path: 'actual-grafana-dashboard.png',
-                fullPage: true
-              });
-              fs.writeFileSync('/tmp/grafana-screenshot-fallback.txt', String(error));
-            }
+            await page.fill('input[name="user"]', 'admin');
+            await page.fill('input[name="password"]', 'admin');
+            await page.click('button[type="submit"]');
 
+            // Wait for redirect away from /login
+            await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 30000 });
+
+            // Dismiss "change password" nag if present
+            const skipChange = page.locator('button:has-text("Skip")');
+            if (await skipChange.isVisible({ timeout: 3000 }).catch(() => false)) await skipChange.click();
+
+            // --- Navigate to dashboard in kiosk mode (hides nav chrome) ---
+            const dashURL = `${BASE}/d/cluster-status/kubernetes-cluster-live-dashboard?orgId=1&refresh=10s&kiosk`;
+            await page.goto(dashURL, { waitUntil: 'networkidle', timeout: 90000 });
+
+            // Wait for at least one panel container to appear
+            await page.waitForSelector(
+              '[data-testid="data-testid panel header"], .panel-container, [class*="panel-container"]',
+              { timeout: 60000 }
+            ).catch(() => console.log('Panel selector timed out - screenshotting anyway'));
+
+            // Extra settle time for chart data to render
+            await page.waitForTimeout(12000);
+
+            await page.screenshot({ path: 'actual-grafana-dashboard.png', fullPage: true });
+            console.log('Screenshot saved.');
             await browser.close();
           })();
-          EOF
+          JSEOF
 
-          node capture-grafana.js || true
+          node capture-grafana.js >> $logFile 2>&1 || true
 
-          if [ ! -s actual-grafana-dashboard.png ]; then
-            echo "# Screenshot was not created by Playwright. Creating fallback PNG." >> $logFile
-            printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=' | base64 -d > actual-grafana-dashboard.png
+          # ---- 6. Validate PNG is real (> 10 KB means actual content) ----
+          FILE_SIZE=$(stat -c%s actual-grafana-dashboard.png 2>/dev/null || echo 0)
+          echo "# Screenshot file size: $FILE_SIZE bytes" >> $logFile
+
+          if [ "$FILE_SIZE" -lt 10240 ]; then
+            echo "# Screenshot looks like a fallback pixel. Waiting 20s and retrying..." >> $logFile
+            sleep 20
+            node capture-grafana.js >> $logFile 2>&1 || true
+            FILE_SIZE=$(stat -c%s actual-grafana-dashboard.png 2>/dev/null || echo 0)
+            echo "# Retry screenshot size: $FILE_SIZE bytes" >> $logFile
+          fi
+
+          if [ "$FILE_SIZE" -lt 10240 ]; then
+            echo "# Screenshot still too small. Grafana panels may not have data yet." >> $logFile
           else
-            echo "# Screenshot artifact created." >> $logFile
+            echo "# Screenshot artifact created successfully ($FILE_SIZE bytes)." >> $logFile
           fi
 
           echo "" >> $logFile
@@ -748,19 +722,13 @@ jobs:
           echo "# Status       : ACTIVE" >> $obsFile
           echo "# Namespace    : monitoring" >> $obsFile
           echo "# Prometheus   : Installed (trimmed - server only)" >> $obsFile
-          echo "# Grafana      : Installed (with email alerting)" >> $obsFile
+          echo "# Grafana      : Installed (dashboard only)" >> $obsFile
           echo "# Dashboard    : Real Grafana Dashboard UID cluster-status" >> $obsFile
-          echo "# Alert Email  : sujey.hariprasad@multicorewareinc.com" >> $obsFile
           echo "# Generated At : $(date -u) UTC" >> $obsFile
           echo "# Commit SHA   : ${{ github.sha }}" >> $obsFile
           echo "# Docker Image : ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}" >> $obsFile
           echo "# ============================================================" >> $obsFile
           echo "" >> $obsFile
-
-          # ---- POD CLASSIFICATION SUMMARY ----
-          echo "# ============================================================" >> $obsFile
-          echo "# POD CLASSIFICATION SUMMARY                                   " >> $obsFile
-          echo "# ============================================================" >> $obsFile
 
           KUBE_SYSTEM_COUNT=$(kubectl get pods -n kube-system --no-headers 2>/dev/null | wc -l)
           DEFAULT_COUNT=$(kubectl get pods -n default --no-headers 2>/dev/null | wc -l)
@@ -770,28 +738,18 @@ jobs:
           TOTAL_COUNT=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
           NODE_COUNT=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
 
-          echo "# Cluster Nodes                         : $NODE_COUNT" >> $obsFile
-          echo "#" >> $obsFile
-          echo "# 1. kube-system pods (K8s control plane" >> $obsFile
-          echo "#    + kube-proxy DaemonSet + metrics-server)" >> $obsFile
-          echo "#                                          : $KUBE_SYSTEM_COUNT" >> $obsFile
-          echo "#" >> $obsFile
-          echo "# 2. App pods (default ns - Helm chart" >> $obsFile
-          echo "#    'my-web-app' / expo-web-release)     : $DEFAULT_COUNT" >> $obsFile
-          echo "#" >> $obsFile
-          echo "# 3. Monitoring namespace total (trimmed) : $MONITORING_COUNT" >> $obsFile
-          echo "#      - Prometheus server only            : $PROM_COUNT" >> $obsFile
-          echo "#      - Grafana (dashboard + email alerts) : $GRAFANA_COUNT" >> $obsFile
-          echo "#" >> $obsFile
-          echo "# TOTAL PODS RUNNING (all namespaces)     : $TOTAL_COUNT" >> $obsFile
-          echo "" >> $obsFile
-          echo "# NOTE: kube-state-metrics and node-exporter were removed" >> $obsFile
-          echo "#       because they only fed metrics not used by the" >> $obsFile
-          echo "#       frontend app dashboard. metrics-server was kept." >> $obsFile
           echo "# ============================================================" >> $obsFile
+          echo "# POD CLASSIFICATION SUMMARY                                   " >> $obsFile
+          echo "# ============================================================" >> $obsFile
+          echo "# Cluster Nodes                         : $NODE_COUNT" >> $obsFile
+          echo "# kube-system pods                      : $KUBE_SYSTEM_COUNT" >> $obsFile
+          echo "# App pods (default ns)                 : $DEFAULT_COUNT" >> $obsFile
+          echo "# Monitoring namespace total (trimmed)  : $MONITORING_COUNT" >> $obsFile
+          echo "#   - Prometheus server only            : $PROM_COUNT" >> $obsFile
+          echo "#   - Grafana (dashboard only)          : $GRAFANA_COUNT" >> $obsFile
+          echo "# TOTAL PODS RUNNING (all namespaces)   : $TOTAL_COUNT" >> $obsFile
           echo "" >> $obsFile
 
-          # ---- MONITORING STACK ----
           echo "# ============================================================" >> $obsFile
           echo "# MONITORING NAMESPACE - PODS                                  " >> $obsFile
           echo "# ============================================================" >> $obsFile
@@ -810,14 +768,6 @@ jobs:
           curl -s http://localhost:3000/api/health >> $obsFile || true
           echo "" >> $obsFile
 
-          # ---- GRAFANA ALERT RULE STATUS ----
-          echo "# ============================================================" >> $obsFile
-          echo "# GRAFANA ALERT RULE STATUS (pod-count-limit)                  " >> $obsFile
-          echo "# ============================================================" >> $obsFile
-          curl -s -u admin:admin http://localhost:3000/api/v1/provisioning/alert-rules >> $obsFile || true
-          echo "" >> $obsFile
-
-          # ---- REAL NODE METRICS WITH BARS ----
           echo "# ============================================================" >> $obsFile
           echo "# REAL NODE METRICS WITH VISUAL BARS                           " >> $obsFile
           echo "# ============================================================" >> $obsFile
@@ -841,7 +791,6 @@ jobs:
             echo "" >> $obsFile
           done
 
-          # ---- POD METRICS ALL NAMESPACES ----
           echo "# ============================================================" >> $obsFile
           echo "# REAL POD METRICS - ALL NAMESPACES WITH VISUAL BARS           " >> $obsFile
           echo "# ============================================================" >> $obsFile
@@ -867,26 +816,18 @@ jobs:
             echo "" >> $obsFile
           done
 
-          # ---- HELM RELEASES ----
           echo "# ============================================================" >> $obsFile
           echo "# HELM RELEASES (ALL NAMESPACES)                               " >> $obsFile
           echo "# ============================================================" >> $obsFile
           helm list --all-namespaces >> $obsFile 2>&1 || true
           echo "" >> $obsFile
 
-          # ---- SUMMARY ----
           echo "# ============================================================" >> $obsFile
           echo "# OBSERVABILITY AUDIT SUMMARY                                  " >> $obsFile
           echo "# ============================================================" >> $obsFile
           echo "# Grafana Dashboard UID : cluster-status" >> $obsFile
           echo "# Grafana Admin URL     : http://localhost:3000" >> $obsFile
-          echo "# Grafana Import URL    : http://localhost:3000/dashboard/import" >> $obsFile
-          echo "#   -> Use 'Import via dashboard JSON model' box, paste the" >> $obsFile
-          echo "#      JSON from grafana-kubernetes-dashboard.json (or the" >> $obsFile
-          echo "#      block below) and click Load." >> $obsFile
           echo "# Prometheus URL        : http://prometheus-server.monitoring.svc.cluster.local:80" >> $obsFile
-          echo "# Alert Rule            : pod-count-limit (threshold > 15 pods)" >> $obsFile
-          echo "# Alert Notification    : sujey.hariprasad@multicorewareinc.com" >> $obsFile
           echo "# Helm Releases Active  : $(helm list --all-namespaces --short 2>/dev/null | wc -l)" >> $obsFile
           echo "# Total Pods (all NS)   : $(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)" >> $obsFile
           echo "# Total Running Pods    : $(kubectl get pods --all-namespaces --no-headers 2>/dev/null | grep -c Running || echo 0)" >> $obsFile
@@ -902,7 +843,24 @@ jobs:
           echo "" >> $obsFile
           echo "# ============================================================" >> $obsFile
 
-      - name: 17. Upload Real Deployment Artifacts (3 Files Only)
+      - name: 16.5 Write deploy-state.json for ship.ps1
+        run: |
+          POD_COUNT=$(kubectl get pods -n default --no-headers 2>/dev/null | grep -c Running || echo 0)
+          cat > deploy-state.json <<EOF
+          {
+            "dockerImage": "${{ secrets.REGISTRY_USERNAME }}/expo-web-app",
+            "buildTag": "${{ github.sha }}",
+            "helmRelease": "expo-web-release",
+            "namespace": "default",
+            "helmChartPath": "./charts/my-web-app",
+            "helmChartOutputFile": "./helm-chart-output.yaml",
+            "podCount": "$POD_COUNT",
+            "expoPort": "8081",
+            "executionDuration": "$SECONDS"
+          }
+          EOF
+
+      - name: 17. Upload Real Deployment Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -911,4 +869,5 @@ jobs:
             ./helm-chart-output.yaml
             ./observability-audit-report.yaml
             ./actual-grafana-dashboard.png
+            ./deploy-state.json
           retention-days: 7
