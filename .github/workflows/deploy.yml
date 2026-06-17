@@ -453,8 +453,8 @@ jobs:
           helm upgrade --install grafana grafana/grafana \
             --namespace monitoring \
             --create-namespace \
-            --wait=false \
-            --timeout=10m \
+            --wait \
+            --timeout=8m \
             --set persistence.enabled=false \
             --set adminUser=admin \
             --set adminPassword=admin \
@@ -468,11 +468,14 @@ jobs:
             --set datasources."datasources\.yaml".datasources[0].type=prometheus \
             --set datasources."datasources\.yaml".datasources[0].url=http://prometheus-server.monitoring.svc.cluster.local:80 \
             --set datasources."datasources\.yaml".datasources[0].access=proxy \
-            --set datasources."datasources\.yaml".datasources[0].isDefault=true >> $logFile 2>&1 || true
+            --set datasources."datasources\.yaml".datasources[0].isDefault=true >> $logFile 2>&1
 
           echo "" >> $logFile
-          echo "# Waiting for Grafana deployment." >> $logFile
-          kubectl rollout status deployment/grafana -n monitoring --timeout=300s >> $logFile 2>&1 || true
+          echo "# Hard-waiting for Grafana pod to be fully Ready..." >> $logFile
+          kubectl rollout status deployment/grafana -n monitoring --timeout=300s >> $logFile 2>&1
+          echo "# Grafana rollout complete." >> $logFile
+          echo "# Waiting 30s for dashboard sidecar to provision ConfigMap..." >> $logFile
+          sleep 30
 
           echo "" >> $logFile
           echo "# --- Grafana Pods ---" >> $logFile
@@ -533,23 +536,36 @@ jobs:
           echo "# GRAFANA DASHBOARD EXPORT STATUS                             " >> $logFile
           echo "# ============================================================" >> $logFile
 
-          sleep 45
-
-          kubectl port-forward -n monitoring svc/grafana 3000:80 > /tmp/grafana-port-forward.log 2>&1 &
+          # Start port-forward (Grafana pod is already Running at this point)
+          pkill -f "port-forward.*grafana" || true
+          sleep 2
+          kubectl port-forward -n monitoring svc/grafana 3000:80 \
+            > /tmp/grafana-port-forward.log 2>&1 &
           echo $! > /tmp/grafana-port-forward.pid
-          sleep 10
 
-          if curl -sf -u admin:admin http://localhost:3000/api/health >/tmp/grafana-health.json 2>/tmp/grafana-health.err; then
-            curl -s -u admin:admin \
-              http://localhost:3000/api/dashboards/uid/cluster-status \
-              -o grafana-native-dashboard.json || true
-          fi
+          # Poll until Grafana HTTP responds (up to 3 min)
+          echo "# Waiting for Grafana HTTP..." >> $logFile
+          for i in {1..36}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -u admin:admin http://localhost:3000/api/health 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "# Grafana HTTP ready (attempt $i)." >> $logFile
+              break
+            fi
+            echo "# Attempt $i/36 - HTTP $HTTP_CODE" >> $logFile
+            sleep 5
+          done
+
+          # Export dashboard JSON
+          curl -s -u admin:admin \
+            http://localhost:3000/api/dashboards/uid/cluster-status \
+            -o grafana-native-dashboard.json 2>/dev/null || true
 
           if [ ! -s grafana-native-dashboard.json ]; then
-            echo "# Grafana API was not reachable in time. Saving provisioned dashboard JSON instead." >> $logFile
+            echo "# Dashboard not yet in API. Using provisioned JSON." >> $logFile
             cp grafana-kubernetes-dashboard.json grafana-native-dashboard.json
           else
-            echo "# Grafana dashboard exported successfully from API." >> $logFile
+            echo "# Grafana dashboard JSON exported from API." >> $logFile
           fi
 
           echo "" >> $logFile
@@ -843,6 +859,47 @@ jobs:
           echo "" >> $obsFile
           echo "# ============================================================" >> $obsFile
 
+      - name: 15.5 Write Grafana Local Access Guide
+        if: always()
+        run: |
+          cat > grafana-access.md <<'MDEOF'
+# How to open Grafana on your local machine
+
+The GitHub Actions runner is destroyed after the workflow ends.
+`kubectl port-forward` only runs inside that runner, so localhost:3000
+is unreachable from your browser once the pipeline finishes.
+
+## To open Grafana locally:
+
+### 1. Make sure kubectl is pointed at your cluster
+```bash
+kubectl config current-context
+```
+
+### 2. Start port-forward on your machine
+```bash
+kubectl port-forward -n monitoring svc/grafana 3000:80
+```
+Keep this terminal open.
+
+### 3. Open in your browser
+http://localhost:3000
+
+Login: **admin** / **admin**
+
+### 4. Navigate to the dashboard
+http://localhost:3000/d/cluster-status/kubernetes-cluster-live-dashboard
+
+---
+If the cluster is a Minikube cluster that only runs during CI,
+you will need to start Minikube locally and re-deploy:
+```bash
+minikube start
+helm upgrade --install grafana grafana/grafana -n monitoring ...
+kubectl port-forward -n monitoring svc/grafana 3000:80
+```
+MDEOF
+
       - name: 16.5 Write deploy-state.json for ship.ps1
         run: |
           POD_COUNT=$(kubectl get pods -n default --no-headers 2>/dev/null | grep -c Running || echo 0)
@@ -870,4 +927,5 @@ jobs:
             ./observability-audit-report.yaml
             ./actual-grafana-dashboard.png
             ./deploy-state.json
+            ./grafana-access.md
           retention-days: 7

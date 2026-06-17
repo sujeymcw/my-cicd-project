@@ -8,10 +8,24 @@
 $ErrorActionPreference = "Stop"
 
 # ---- Load deployment state written by the pipeline ----
+# deploy-state.json is produced by the GitHub Actions pipeline (step 16.5)
+# and included in the 'real-grafana-deployment-artifacts' artifact ZIP.
+# Download the ZIP from the Actions run, extract it, and place deploy-state.json
+# in the same folder as this script before running ship.ps1.
 $stateFile = "./deploy-state.json"
 
 if (-not (Test-Path $stateFile)) {
-    Write-Error "deploy-state.json not found. Run the main pipeline first."
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Red
+    Write-Host " deploy-state.json NOT FOUND" -ForegroundColor Red
+    Write-Host "============================================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Steps to fix:" -ForegroundColor Yellow
+    Write-Host "  1. Go to your GitHub repo -> Actions -> latest run" -ForegroundColor Yellow
+    Write-Host "  2. Scroll to Artifacts -> download 'real-grafana-deployment-artifacts'" -ForegroundColor Yellow
+    Write-Host "  3. Extract the ZIP and copy deploy-state.json next to ship.ps1" -ForegroundColor Yellow
+    Write-Host "  4. Run ship.ps1 again" -ForegroundColor Yellow
+    Write-Host ""
     exit 1
 }
 
