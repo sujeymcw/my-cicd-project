@@ -296,35 +296,83 @@ jobs:
       - name: 10.6 Pod Inventory and Use-Case Breakdown
         run: |
           logFile="./helm-chart-output.yaml"
+
+          # ---- Use-case lookup: maps pod name prefix -> description ----
+          # Each running pod is matched against known prefixes in order.
+          # The first match wins. Unknown pods fall through to "Unknown".
+          get_pod_usecase() {
+            local name="$1"
+            local ns="$2"
+            case "$name" in
+              kube-apiserver*)          echo "Control plane API entrypoint — all kubectl/API calls go here" ;;
+              etcd*)                    echo "Cluster state store — holds all K8s object definitions" ;;
+              kube-scheduler*)          echo "Schedules pods onto nodes based on resource availability" ;;
+              kube-controller-manager*) echo "Runs core K8s control loops (deployments, replicasets, etc.)" ;;
+              coredns*)                 echo "In-cluster DNS — resolves service names to ClusterIPs" ;;
+              kube-proxy*)              echo "Per-node iptables/ipvs rules for Service routing (DaemonSet)" ;;
+              storage-provisioner*)     echo "Dynamic PersistentVolume provisioning (minikube built-in)" ;;
+              metrics-server*)          echo "Powers kubectl top and HPA autoscaling metrics" ;;
+              expo-web-deployment*)     echo "YOUR APP — Expo/React web frontend served via Helm chart" ;;
+              prometheus-server*)       echo "Scrapes and stores metrics; Grafana queries this directly" ;;
+              grafana*)                 echo "Dashboard UI — visualises Prometheus metrics in-browser" ;;
+              *)                        echo "Unknown — review this pod manually" ;;
+            esac
+          }
+
           echo "# ============================================================" >> $logFile
-          echo "# POD INVENTORY (ALL NAMESPACES)                               " >> $logFile
+          echo "# POD INVENTORY WITH USE-CASE ANNOTATIONS (ALL NAMESPACES)    " >> $logFile
           echo "# ============================================================" >> $logFile
-          kubectl get pods --all-namespaces -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,STATUS:.status.phase,NODE:.spec.nodeName >> $logFile 2>&1 || true
+          echo "# Each pod currently running in the cluster is listed below   " >> $logFile
+          echo "# with its namespace, status, and a plain-English explanation " >> $logFile
+          echo "# of what it does and whether it is required.                 " >> $logFile
+          echo "# ============================================================" >> $logFile
           echo "" >> $logFile
-          cat >> $logFile <<'EOF'
-          # ------------------------------------------------------------
-          # POD USE-CASE REFERENCE
-          # ------------------------------------------------------------
-          # Pod                       | Namespace   | Use Case
-          # --------------------------|-------------|------------------------------------
-          # kube-apiserver             kube-system   Cluster control plane API entrypoint
-          # etcd                       kube-system   Cluster state store
-          # kube-scheduler             kube-system   Schedules pods onto nodes
-          # kube-controller-manager    kube-system   Runs core K8s control loops
-          # coredns                    kube-system   In-cluster DNS resolution
-          # kube-proxy (DaemonSet)     kube-system   Per-node network routing rules
-          # storage-provisioner        kube-system   Dynamic PV provisioning (minikube)
-          # metrics-server             kube-system   Powers `kubectl top` and HPA metrics
-          # expo-web-deployment-*      default       Your application pod (frontend/web app)
-          # prometheus-server          monitoring    Scrapes and stores metrics, feeds Grafana
-          # grafana                    monitoring    Dashboard UI + alerting/email notifications
-          # ------------------------------------------------------------
-          # REMOVED (not required to run/view your app dashboard):
-          #   kube-state-metrics        - exposed K8s object-state metrics, unused by your panels
-          #   prometheus-node-exporter  - exposed per-node OS metrics, unused by your panels
-          # metrics-server is KEPT (powers kubectl top / your existing metrics sections).
-          # ------------------------------------------------------------
-          EOF
+
+          printf "# %-52s %-12s %-8s  %s\n" "POD NAME" "NAMESPACE" "STATUS" "USE CASE" >> $logFile
+          printf "# %-52s %-12s %-8s  %s\n" "$(printf '%0.s-' {1..52})" "$(printf '%0.s-' {1..12})" "--------" "$(printf '%0.s-' {1..50})" >> $logFile
+
+          kubectl get pods --all-namespaces --no-headers \
+            -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,STATUS:.status.phase \
+            2>/dev/null | while read -r ns name status; do
+              usecase=$(get_pod_usecase "$name" "$ns")
+              printf "# %-52s %-12s %-8s  %s\n" "$name" "$ns" "${status:-Unknown}" "$usecase" >> $logFile
+          done
+
+          echo "" >> $logFile
+
+          # ---- Required vs optional summary ----
+          cat >> $logFile <<'LEGEND'
+          # ============================================================
+          # REQUIRED / OPTIONAL CLASSIFICATION
+          # ============================================================
+          #
+          # REQUIRED (cluster cannot function without these):
+          #   kube-apiserver          kube-system   Hard required
+          #   etcd                    kube-system   Hard required
+          #   kube-scheduler          kube-system   Hard required
+          #   kube-controller-manager kube-system   Hard required
+          #   coredns                 kube-system   Hard required (DNS)
+          #   kube-proxy              kube-system   Hard required (DaemonSet, 1 per node)
+          #   storage-provisioner     kube-system   Required for PVC-backed apps (minikube)
+          #   metrics-server          kube-system   Required — powers kubectl top and HPA
+          #
+          # YOUR APPLICATION:
+          #   expo-web-deployment-*   default       Required — this is your deployed app
+          #
+          # MONITORING (kept, used by Grafana dashboard):
+          #   prometheus-server       monitoring    Required — Grafana queries this for metrics
+          #   grafana                 monitoring    Required — provides the live dashboard UI
+          #
+          # REMOVED (not needed for this setup):
+          #   kube-state-metrics      monitoring    REMOVED — only feeds K8s object-state
+          #                                         metrics unused by current dashboard panels
+          #   prometheus-node-exporter monitoring   REMOVED — only feeds per-node OS metrics
+          #                                         unused by current dashboard panels
+          #
+          # NET RESULT: every pod currently running is necessary.
+          # No further reductions are possible without losing functionality.
+          # ============================================================
+          LEGEND
           echo "" >> $logFile
 
       - name: 11. Install Prometheus (Trimmed - Frontend Dashboard Only)
@@ -447,71 +495,11 @@ jobs:
           kubectl label configmap grafana-kubernetes-dashboard \
             -n monitoring grafana_dashboard=1 --overwrite
 
-      - name: 12.5 Provision Grafana Alert Rule + Email Contact Point
+      - name: 13. Install Grafana with Dashboard Provisioning
         run: |
-          # Pod-count threshold alert. Adjust the value 15 below to your
-          # actual desired pod limit for this cluster.
-          cat > alerting.yaml <<'EOF'
-          apiVersion: 1
-          contactPoints:
-            - orgId: 1
-              name: pod-limit-email
-              receivers:
-                - uid: pod-limit-email-receiver
-                  type: email
-                  settings:
-                    addresses: sujey.hariprasad@multicorewareinc.com
-                    singleEmail: true
-          policies:
-            - orgId: 1
-              receiver: pod-limit-email
-          groups:
-            - orgId: 1
-              name: pod-count-group
-              folder: General
-              interval: 1m
-              rules:
-                - uid: pod-count-limit
-                  title: Pod Count Exceeds Limit
-                  condition: C
-                  data:
-                    - refId: A
-                      datasourceUid: Prometheus
-                      relativeTimeRange:
-                        from: 60
-                        to: 0
-                      model:
-                        expr: count(kube_pod_info)
-                        instant: true
-                        refId: A
-                    - refId: C
-                      datasourceUid: "__expr__"
-                      model:
-                        type: threshold
-                        expression: A
-                        conditions:
-                          - evaluator:
-                              type: gt
-                              params: [15]
-                        refId: C
-                  noDataState: NoData
-                  execErrState: Alerting
-                  for: 1m
-                  annotations:
-                    summary: "Cluster pod count {{ $values.A }} exceeded the configured limit of 15"
-                  labels:
-                    severity: warning
-          EOF
-
-          kubectl create configmap grafana-alerting-provisioning \
-            -n monitoring \
-            --from-file=alerting.yaml \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: 13. Install Grafana with Real Dashboard Provisioning + Email Alerts
-        run: |
-          # NOTE: SMTP password is pulled from a GitHub secret, never hardcoded.
-          # Required secret: GRAFANA_SMTP_USER, GRAFANA_SMTP_PASSWORD
+          # NOTE: Grafana alert/email provisioning has been removed from this step.
+          # Alerting is handled externally via ship.ps1 (Slack + Outlook).
+          # SMTP secrets (GRAFANA_SMTP_USER, GRAFANA_SMTP_PASSWORD) are no longer required.
           helm upgrade --install grafana grafana/grafana \
             --namespace monitoring \
             --set persistence.enabled=false \
@@ -526,18 +514,7 @@ jobs:
             --set datasources."datasources\.yaml".datasources[0].type=prometheus \
             --set datasources."datasources\.yaml".datasources[0].url=http://prometheus-server.monitoring.svc.cluster.local:80 \
             --set datasources."datasources\.yaml".datasources[0].access=proxy \
-            --set datasources."datasources\.yaml".datasources[0].isDefault=true \
-            --set grafana\\.ini.smtp.enabled=true \
-            --set grafana\\.ini.smtp.host="smtp.gmail.com:587" \
-            --set grafana\\.ini.smtp.user="${{ secrets.GRAFANA_SMTP_USER }}" \
-            --set grafana\\.ini.smtp.password="${{ secrets.GRAFANA_SMTP_PASSWORD }}" \
-            --set grafana\\.ini.smtp.from_address="${{ secrets.GRAFANA_SMTP_USER }}" \
-            --set grafana\\.ini.smtp.from_name="Grafana Pod Alerts" \
-            --set "extraConfigmapMounts[0].name=alerting-provisioning" \
-            --set "extraConfigmapMounts[0].configMap=grafana-alerting-provisioning" \
-            --set "extraConfigmapMounts[0].mountPath=/etc/grafana/provisioning/alerting/alerting.yaml" \
-            --set "extraConfigmapMounts[0].subPath=alerting.yaml" \
-            --set "extraConfigmapMounts[0].readOnly=true"
+            --set datasources."datasources\.yaml".datasources[0].isDefault=true
 
           kubectl rollout status deployment/grafana -n monitoring --timeout=180s
 
@@ -571,6 +548,8 @@ jobs:
           echo "# kube-state-metrics and node-exporter were removed since" >> $logFile
           echo "# they are not used by the frontend app dashboard panels." >> $logFile
           echo "# metrics-server was kept as requested." >> $logFile
+          echo "# Grafana alert provisioning removed — notifications handled" >> $logFile
+          echo "# externally by ship.ps1 (Slack + Outlook)." >> $logFile
           echo "# ============================================================" >> $logFile
           echo "" >> $logFile
 
@@ -668,9 +647,9 @@ jobs:
           echo "# Status       : ACTIVE" >> $obsFile
           echo "# Namespace    : monitoring" >> $obsFile
           echo "# Prometheus   : Installed (trimmed - server only)" >> $obsFile
-          echo "# Grafana      : Installed (with email alerting)" >> $obsFile
+          echo "# Grafana      : Installed (dashboard provisioning only)" >> $obsFile
+          echo "# Alerting     : Handled externally by ship.ps1 (Slack + Outlook)" >> $obsFile
           echo "# Dashboard    : Real Grafana Dashboard UID cluster-status" >> $obsFile
-          echo "# Alert Email  : sujey.hariprasad@multicorewareinc.com" >> $obsFile
           echo "# Generated At : $(date -u) UTC" >> $obsFile
           echo "# Commit SHA   : ${{ github.sha }}" >> $obsFile
           echo "# Docker Image : ${{ secrets.REGISTRY_USERNAME }}/expo-web-app:${{ github.sha }}" >> $obsFile
@@ -701,13 +680,15 @@ jobs:
           echo "#" >> $obsFile
           echo "# 3. Monitoring namespace total (trimmed) : $MONITORING_COUNT" >> $obsFile
           echo "#      - Prometheus server only            : $PROM_COUNT" >> $obsFile
-          echo "#      - Grafana (dashboard + email alerts) : $GRAFANA_COUNT" >> $obsFile
+          echo "#      - Grafana (dashboard only)          : $GRAFANA_COUNT" >> $obsFile
           echo "#" >> $obsFile
           echo "# TOTAL PODS RUNNING (all namespaces)     : $TOTAL_COUNT" >> $obsFile
           echo "" >> $obsFile
           echo "# NOTE: kube-state-metrics and node-exporter were removed" >> $obsFile
           echo "#       because they only fed metrics not used by the" >> $obsFile
           echo "#       frontend app dashboard. metrics-server was kept." >> $obsFile
+          echo "#       Grafana alert provisioning removed — ship.ps1 handles" >> $obsFile
+          echo "#       Slack and Outlook notifications post-pipeline." >> $obsFile
           echo "# ============================================================" >> $obsFile
           echo "" >> $obsFile
 
@@ -728,13 +709,6 @@ jobs:
           echo "# GRAFANA HEALTH CHECK                                         " >> $obsFile
           echo "# ============================================================" >> $obsFile
           curl -s http://localhost:3000/api/health >> $obsFile || true
-          echo "" >> $obsFile
-
-          # ---- GRAFANA ALERT RULE STATUS ----
-          echo "# ============================================================" >> $obsFile
-          echo "# GRAFANA ALERT RULE STATUS (pod-count-limit)                  " >> $obsFile
-          echo "# ============================================================" >> $obsFile
-          curl -s -u admin:admin http://localhost:3000/api/v1/provisioning/alert-rules >> $obsFile || true
           echo "" >> $obsFile
 
           # ---- REAL NODE METRICS WITH BARS ----
@@ -805,8 +779,7 @@ jobs:
           echo "#      JSON from grafana-kubernetes-dashboard.json (or the" >> $obsFile
           echo "#      block below) and click Load." >> $obsFile
           echo "# Prometheus URL        : http://prometheus-server.monitoring.svc.cluster.local:80" >> $obsFile
-          echo "# Alert Rule            : pod-count-limit (threshold > 15 pods)" >> $obsFile
-          echo "# Alert Notification    : sujey.hariprasad@multicorewareinc.com" >> $obsFile
+          echo "# Alerting              : ship.ps1 (Slack webhook + Outlook COM)" >> $obsFile
           echo "# Helm Releases Active  : $(helm list --all-namespaces --short 2>/dev/null | wc -l)" >> $obsFile
           echo "# Total Pods (all NS)   : $(kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l)" >> $obsFile
           echo "# Total Running Pods    : $(kubectl get pods --all-namespaces --no-headers 2>/dev/null | grep -c Running || echo 0)" >> $obsFile
@@ -822,7 +795,37 @@ jobs:
           echo "" >> $obsFile
           echo "# ============================================================" >> $obsFile
 
-      - name: 17. Upload Real Deployment Artifacts (3 Files Only)
+      - name: 16.5 Write deploy-state.json for ship.ps1
+        run: |
+          # Collect runtime values that ship.ps1 needs to build its notifications.
+          # This file is included in the artifact ZIP. After downloading the ZIP,
+          # place deploy-state.json next to ship.ps1 and run it locally.
+
+          POD_COUNT=$(kubectl get pods --all-namespaces --no-headers 2>/dev/null | grep -c Running || echo 0)
+          PIPELINE_START="${{ github.run_started_at }}"
+          NOW_EPOCH=$(date +%s)
+          # GitHub does not expose run_started_at as epoch directly, so we use
+          # a best-effort delta from the job start captured via env.
+          EXECUTION_DURATION=$(( $(date +%s) - $(date -d "${PIPELINE_START}" +%s 2>/dev/null || echo $NOW_EPOCH) ))
+
+          cat > deploy-state.json <<EOF
+          {
+            "dockerImage":          "${{ secrets.REGISTRY_USERNAME }}/expo-web-app",
+            "buildTag":             "${{ github.sha }}",
+            "helmRelease":          "expo-web-release",
+            "namespace":            "default",
+            "helmChartPath":        "./charts/my-web-app",
+            "podCount":             "$POD_COUNT",
+            "expoPort":             "80",
+            "executionDuration":    "$EXECUTION_DURATION",
+            "helmChartOutputFile":  "helm-chart-output.yaml"
+          }
+          EOF
+
+          echo "deploy-state.json written:"
+          cat deploy-state.json
+
+      - name: 17. Upload Real Deployment Artifacts (4 Files)
         uses: actions/upload-artifact@v4
         with:
           name: real-grafana-deployment-artifacts
@@ -830,4 +833,5 @@ jobs:
             ./helm-chart-output.yaml
             ./observability-audit-report.yaml
             ./actual-grafana-dashboard.png
+            ./deploy-state.json
           retention-days: 7
